@@ -1,0 +1,28 @@
+[package]
+name = "aurora"
+version = "0.1.0"
+description = "Aurora - 常用软件更新检查与升级包下载工具"
+edition = "2021"
+
+[lib]
+name = "aurora_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+regex = "1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
