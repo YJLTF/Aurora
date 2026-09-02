@@ -3,7 +3,18 @@
  * 便于纯前端调试 UI。打包后不会进入执行路径。
  */
 import { compareVersion } from "./types";
-import type { CheckOutcome, Config, DownloadProgress, SoftItem } from "./types";
+import type {
+  AppInfo,
+  CheckOutcome,
+  Config,
+  DownloadProgress,
+  SelfUpdateInfo,
+  SoftItem,
+  Settings,
+  VsixCheck,
+  VsixInfo,
+  VsixRef,
+} from "./types";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,7 +47,10 @@ export function mockConfig(): Config {
       githubApiBase: "https://api.github.com",
       downloadProxy: "",
       githubToken: "",
+      vscodeDir: "C:\\Users\\demo\\Downloads\\vscode",
+      autoCheckSelf: true,
     },
+    vscodeChecks: [],
     items: [
       gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
       {
@@ -88,7 +102,7 @@ export async function mockCheck(item: SoftItem): Promise<CheckOutcome> {
   await wait(400 + Math.random() * 900);
   const fake = FAKE[item.id];
   if (!fake) {
-    return { version: "", releaseUrl: "", assets: [], suggested: 0, hasUpdate: null, error: "模拟数据中无此软件" };
+    return { version: "", releaseUrl: "", assets: [], suggested: 0, hasUpdate: null, notes: "", error: "模拟数据中无此软件" };
   }
   let suggested = 0;
   let best = -Infinity;
@@ -116,6 +130,7 @@ export async function mockCheck(item: SoftItem): Promise<CheckOutcome> {
     assets: fake.assets.map(([name, size]) => ({ name, url: `https://example.com/${name}`, size })),
     suggested,
     hasUpdate,
+    notes: "",
     error: "",
   };
 }
@@ -146,4 +161,76 @@ export function mockDownloadList(): string[] {
     "desktop.ini",
     "readme.txt",
   ];
+}
+
+export function mockAppInfo(): AppInfo {
+  return { version: "0.2.0", repo: "YJLTF/Aurora" };
+}
+
+/** 模拟自更新：0.2.0 → 0.3.0 */
+export async function mockSelfUpdate(_settings: Settings): Promise<SelfUpdateInfo> {
+  await wait(600);
+  return {
+    currentVersion: "0.2.0",
+    latestVersion: "0.3.0",
+    hasUpdate: true,
+    releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.3.0",
+    notes: "### v0.3.0（模拟数据）\n- 新增 VSCode 插件更新检查\n- 界面细节优化",
+    assets: [
+      { name: "Aurora_0.3.0_x64-setup.exe", url: "https://example.com/Aurora_0.3.0_x64-setup.exe", size: 8_800_000 },
+      { name: "Aurora_0.3.0_arm64-setup.exe", url: "https://example.com/Aurora_0.3.0_arm64-setup.exe", size: 8_100_000 },
+    ],
+    suggested: 0,
+    error: "",
+  };
+}
+
+const MOCK_VSIX: VsixInfo[] = [
+  { id: "dbaeumer.vscode-eslint", version: "3.0.10", target: "", fileName: "dbaeumer.vscode-eslint-3.0.10.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode\\前端" },
+  { id: "ms-ceintl.vscode-language-pack-zh-hans", version: "1.131.2026082318", target: "", fileName: "ms-ceintl.vscode-language-pack-zh-hans-1.131.2026082318.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode" },
+  { id: "ms-python.python", version: "2026.4.0", target: "win32-x64", fileName: "ms-python.python-2026.4.0-win32-x64.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode\\python" },
+  { id: "ms-python.vscode-pylance", version: "2026.3.1", target: "", fileName: "ms-python.vscode-pylance-2026.3.1.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode\\python" },
+  { id: "redhat.java", version: "1.55.0", target: "win32-x64", fileName: "redhat.java-1.55.0-win32-x64.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode\\Extension Pack for Java" },
+  { id: "vmware.vscode-boot-dev-pack", version: "0.2.1", target: "", fileName: "vmware.vscode-boot-dev-pack-0.2.1.vsix", dir: "C:\\Users\\demo\\Downloads\\vscode\\Spring Boot Extension Pack" },
+];
+
+export function mockListVsix(): VsixInfo[] {
+  return MOCK_VSIX;
+}
+
+export function mockInstalledExtensions(): Record<string, string> {
+  return {
+    "dbaeumer.vscode-eslint": "3.0.10",
+    "ms-ceintl.vscode-language-pack-zh-hans": "1.131.2026082318",
+    "ms-python.python": "2026.4.0",
+    "ms-python.vscode-pylance": "2026.3.1",
+    "redhat.java": "1.55.0",
+    "vmware.vscode-boot-dev-pack": "0.2.1",
+  };
+}
+
+const VSIX_LATEST: Record<string, string> = {
+  "dbaeumer.vscode-eslint": "3.0.13",
+  "ms-ceintl.vscode-language-pack-zh-hans": "1.135.2026090112",
+  "ms-python.python": "2026.4.0",
+  "ms-python.vscode-pylance": "2026.4.2",
+  "redhat.java": "1.55.0",
+  "vmware.vscode-boot-dev-pack": "0.2.1",
+};
+
+export async function mockVscodeChecks(items: VsixRef[]): Promise<VsixCheck[]> {
+  await wait(500 + Math.random() * 500);
+  const now = Date.now();
+  return items.map((it) => {
+    const latest = VSIX_LATEST[it.id.toLowerCase()] ?? "";
+    return {
+      id: it.id,
+      localVersion: it.localVersion,
+      latestVersion: latest,
+      downloadUrl: latest ? `https://example.com/${it.id}-${latest}.vsix` : "",
+      hasUpdate: latest ? compareVersion(latest, it.localVersion) > 0 : false,
+      checkedAt: now,
+      error: latest ? "" : "模拟数据中无此插件",
+    };
+  });
 }

@@ -1,11 +1,13 @@
 use crate::model::{
-    score_asset, Asset, CheckOutcome, DownloadProgress, Settings, SoftwareItem, Source,
+    score_asset, Asset, CheckOutcome, DownloadProgress, SelfUpdateInfo, Settings, SoftwareItem,
+    Source,
 };
 use crate::version::compare;
 use futures_util::StreamExt;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,15 +18,45 @@ use tokio::io::AsyncWriteExt;
 #[derive(Default)]
 pub struct AppState {
     pub cancels: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// 下载暂停标记
+    pub pauses: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+/// 瞬时错误自动重试次数（不含首次）
+const MAX_AUTO_RETRIES: u32 = 2;
+
+fn base_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent(concat!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Aurora/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(15))
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Aurora/0.1")
-        .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(15))
-        .build()
-        .unwrap_or_default()
+    base_client_builder().build().unwrap_or_default()
+}
+
+/// 构建"指定域名优先走 IPv4"的客户端：本机 IPv6 半通（TCP 可连但数据黑洞）时兜底。
+/// 解析不到 IPv4（纯 IPv6/代理场景）时退回常规构建，不影响原有通路。
+pub(crate) fn client_with_ipv4_pref(host: &str) -> reqwest::Client {
+    let builder = base_client_builder();
+    let Ok(addrs) = (host, 443u16).to_socket_addrs() else {
+        return builder.build().unwrap_or_default();
+    };
+    let v4: Vec<std::net::SocketAddr> = addrs.filter(|a| a.is_ipv4()).collect();
+    if v4.is_empty() {
+        return builder.build().unwrap_or_default();
+    }
+    builder.resolve_to_addrs(host, &v4).build().unwrap_or_default()
+}
+
+/// 从 URL 提取主机名（用于 IPv4 优先解析）
+fn host_of(url: &str) -> String {
+    let rest = url.split("://").nth(1).unwrap_or("");
+    rest.split(['/']).next().unwrap_or("").to_string()
 }
 
 /// 检测单个软件的最新版本
@@ -50,6 +82,7 @@ pub async fn check_item(item: &SoftwareItem, settings: &Settings) -> CheckOutcom
             assets: vec![],
             suggested: 0,
             has_update: None,
+            notes: String::new(),
             error: e,
         },
     }
@@ -117,7 +150,20 @@ fn outcome_from_release(v: &Value) -> CheckResult {
         .max_by_key(|(_, a)| score_asset(&a.name))
         .map(|(i, _)| i as u32)
         .unwrap_or(0);
-    Ok(CheckOutcome { version, release_url, assets, suggested, has_update: None, error: String::new() })
+    let notes = v
+        .get("body")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(CheckOutcome {
+        version,
+        release_url,
+        assets,
+        suggested,
+        has_update: None,
+        notes,
+        error: String::new(),
+    })
 }
 
 async fn check_github(repo: &str, settings: &Settings) -> CheckResult {
@@ -205,8 +251,36 @@ async fn check_html(check_url: &str, version_regex: &str, download_template: &st
         assets,
         suggested: 0,
         has_update: None,
+        notes: String::new(),
         error: String::new(),
     })
+}
+
+/// 检查 Aurora 自身的更新（GitHub Releases，仓库见 model::SELF_REPO）
+pub async fn check_self_update(current_version: &str, settings: &Settings) -> SelfUpdateInfo {
+    let mut info = SelfUpdateInfo {
+        current_version: current_version.to_string(),
+        latest_version: String::new(),
+        has_update: false,
+        release_url: String::new(),
+        notes: String::new(),
+        assets: vec![],
+        suggested: 0,
+        error: String::new(),
+    };
+    match check_github(crate::model::SELF_REPO, settings).await {
+        Ok(o) => {
+            info.latest_version = o.version.clone();
+            info.release_url = o.release_url;
+            info.notes = o.notes;
+            info.assets = o.assets;
+            info.suggested = o.suggested;
+            info.has_update = !o.version.trim().is_empty()
+                && compare(o.version.trim(), current_version.trim()) == std::cmp::Ordering::Greater;
+        }
+        Err(e) => info.error = e,
+    }
+    info
 }
 
 fn send_progress(
@@ -249,6 +323,8 @@ pub async fn download_file(
     file_name: String,
     dest_dir: String,
     proxy_prefix: String,
+    // VSCode 插件下载传 true：目标 CDN 在本机可能有半通 IPv6
+    prefer_ipv4: Option<bool>,
 ) -> Result<String, String> {
     let dest_dir = dest_dir.trim().to_string();
     if dest_dir.is_empty() {
@@ -287,23 +363,60 @@ pub async fn download_file(
     let tmp_path = final_path.with_extension("part");
 
     let cancel = Arc::new(AtomicBool::new(false));
+    let pause = Arc::new(AtomicBool::new(false));
     state
         .cancels
         .lock()
         .unwrap()
         .insert(item_id.clone(), cancel.clone());
+    state
+        .pauses
+        .lock()
+        .unwrap()
+        .insert(item_id.clone(), pause.clone());
 
     let display_name = final_path
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| safe_name.clone());
-    let client = http_client();
-    let result = pump(
-        &app, &client, &real_url, &tmp_path, &final_path, &item_id, &display_name, &cancel,
-    )
-    .await;
+    let client = if prefer_ipv4.unwrap_or(false) {
+        client_with_ipv4_pref(&host_of(&real_url))
+    } else {
+        http_client()
+    };
+
+    // 自动重试：网络中断等瞬时错误从 .part 断点续传，暂停/取消立即返回
+    let mut attempt = 0u32;
+    let result = loop {
+        match pump(
+            &app, &client, &real_url, &tmp_path, &final_path, &item_id, &display_name, &cancel,
+            &pause,
+        )
+        .await
+        {
+            Ok(p) => break Ok(p),
+            Err(e) if e == "下载已取消" || e == "下载已暂停" => break Err(e),
+            Err(e) => {
+                if attempt >= MAX_AUTO_RETRIES {
+                    break Err(e);
+                }
+                attempt += 1;
+                // 退避等待，期间设置的取消/暂停会在下一轮 pump 顶部生效
+                let backoff = u64::from(attempt) * 800;
+                let mut waited = 0u64;
+                while waited < backoff
+                    && !cancel.load(AtomicOrdering::Relaxed)
+                    && !pause.load(AtomicOrdering::Relaxed)
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    waited += 100;
+                }
+            }
+        }
+    };
 
     state.cancels.lock().unwrap().remove(&item_id);
+    state.pauses.lock().unwrap().remove(&item_id);
     result
 }
 
@@ -316,21 +429,43 @@ async fn pump(
     item_id: &str,
     name: &str,
     cancel: &AtomicBool,
+    pause: &AtomicBool,
 ) -> Result<String, String> {
-    let resp = match client.get(url).send().await {
-        Ok(r) => r,
-        Err(e) => return Err(format!("连接下载地址失败: {e}")),
+    // 已有分片则从断点续传；分片越界（416，资源可能已更新）时删除分片从头下
+    let mut part_size = part_file_size(tmp);
+    let resp = loop {
+        let mut req = client.get(url);
+        if part_size > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={part_size}-"));
+        }
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => return Err(format!("连接下载地址失败: {e}")),
+        };
+        let status = resp.status();
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && part_size > 0 {
+            let _ = tokio::fs::remove_file(tmp).await;
+            part_size = 0;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("下载地址返回 {status}"));
+        }
+        break resp;
     };
-    if !resp.status().is_success() {
-        return Err(format!("下载地址返回 {}", resp.status()));
-    }
-    let total = resp.content_length().unwrap_or(0);
+
+    // 服务器不支持 Range 时会返回 200 全量，此时覆盖重写
+    let resume = part_size > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    let base = if resume { part_size } else { 0 };
+    let total = resp.content_length().map(|l| l + base).unwrap_or(0);
     let mut stream = resp.bytes_stream();
-    let mut file = match tokio::fs::File::create(tmp).await {
-        Ok(f) => f,
-        Err(e) => return Err(format!("创建文件失败: {e}")),
-    };
-    let mut received: u64 = 0;
+    let mut file = if resume {
+        tokio::fs::OpenOptions::new().append(true).open(tmp).await
+    } else {
+        tokio::fs::File::create(tmp).await
+    }
+    .map_err(|e| format!("创建文件失败: {e}"))?;
+    let mut received: u64 = base;
     let mut last_emit = Instant::now() - Duration::from_millis(500);
 
     loop {
@@ -340,18 +475,24 @@ async fn pump(
             send_progress(app, item_id, name, received, total, "cancelled", "", "已取消");
             return Err("下载已取消".into());
         }
+        // 暂停保留 .part 分片，供「继续」断点续传
+        if pause.load(AtomicOrdering::Relaxed) {
+            drop(file);
+            let part = tmp.to_string_lossy().to_string();
+            send_progress(app, item_id, name, received, total, "paused", &part, "已暂停");
+            return Err("下载已暂停".into());
+        }
         let chunk = match stream.next().await {
             Some(Ok(b)) => b,
             Some(Err(e)) => {
                 drop(file);
-                let _ = tokio::fs::remove_file(tmp).await;
+                // 保留分片供自动重试/手动重试续传
                 return Err(format!("下载中断: {e}"));
             }
             None => break,
         };
         if let Err(e) = file.write_all(&chunk).await {
             drop(file);
-            let _ = tokio::fs::remove_file(tmp).await;
             return Err(format!("写入文件失败: {e}"));
         }
         received += chunk.len() as u64;
@@ -374,6 +515,18 @@ async fn pump(
     Ok(final_str)
 }
 
+fn part_file_size(p: &std::path::Path) -> u64 {
+    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
+/// 暂停指定下载：保留 .part 分片，可再次调用 download_file 断点续传
+#[tauri::command]
+pub fn pause_download(state: State<'_, AppState>, item_id: String) {
+    if let Some(flag) = state.pauses.lock().unwrap().get(&item_id) {
+        flag.store(true, AtomicOrdering::Relaxed);
+    }
+}
+
 #[tauri::command]
 pub fn cancel_download(state: State<'_, AppState>, item_id: String) {
     if let Some(flag) = state.cancels.lock().unwrap().get(&item_id) {
@@ -383,8 +536,9 @@ pub fn cancel_download(state: State<'_, AppState>, item_id: String) {
 
 /// 列出下载目录中的文件名，供前端匹配“最新版本是否已下载”。
 /// 目录不存在或不可读时返回空列表，不让检查流程报错。
+/// async：目录遍历放在工作线程，避免大目录阻塞主线程。
 #[tauri::command]
-pub fn list_downloads(dest_dir: String) -> Result<Vec<String>, String> {
+pub async fn list_downloads(dest_dir: String) -> Result<Vec<String>, String> {
     let dir = std::path::PathBuf::from(dest_dir.trim());
     let mut out = Vec::new();
     let rd = match std::fs::read_dir(&dir) {

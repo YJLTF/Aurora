@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import type { Asset, DownloadProgress, ItemStatus, SoftItem } from "../types";
 import { timeAgo } from "../utils";
+import DlProgress from "./DlProgress.vue";
 
 const props = defineProps<{
   item: SoftItem;
@@ -19,6 +20,8 @@ const emit = defineEmits<{
   (e: "download", asset: Asset | null): void;
   (e: "pick"): void;
   (e: "cancel"): void;
+  (e: "pause"): void;
+  (e: "resume"): void;
   (e: "mark"): void;
   (e: "setInstalled", version: string): void;
   (e: "openPath", path: string, reveal?: boolean): void;
@@ -54,13 +57,6 @@ const sourceTitle = computed(() => {
 
 const latestLabel = computed(() => props.item.latestVersion || "—");
 const hasAssets = computed(() => props.item.assets.length > 0);
-
-const pct = computed(() => {
-  const d = props.dl;
-  if (!d) return 0;
-  if (!d.total) return 0;
-  return Math.min(100, Math.round((d.received / d.total) * 100));
-});
 
 const doneName = computed(
   () => props.donePath.split(/[\\/]/).pop() ?? props.donePath,
@@ -122,17 +118,13 @@ function commit() {
         {{ item.lastError }}
       </div>
 
-      <div v-if="dl" class="dl" role="status">
-        <div class="bar" :class="{ indet: !dl.total }">
-          <div class="fill" :style="{ width: pct + '%' }"></div>
-        </div>
-        <span class="dl-text">{{
-          dl.total
-            ? `${dl.fileName} · ${pct}% · ${ (dl.received / 1048576).toFixed(1) }/${ (dl.total / 1048576).toFixed(1) } MB`
-            : `${dl.fileName} · ${(dl.received / 1048576).toFixed(1)} MB`
-        }}</span>
-        <button class="mini danger" @click="emit('cancel')">取消</button>
-      </div>
+      <DlProgress
+        v-if="dl"
+        :dl="dl"
+        @pause="emit('pause')"
+        @resume="emit('resume')"
+        @cancel="emit('cancel')"
+      />
       <div v-else-if="donePath" class="dl-done">
         <span class="ok-mark">✓</span>
         <span class="dl-text" :title="donePath">{{ doneName }}</span>

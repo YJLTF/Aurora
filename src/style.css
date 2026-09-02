@@ -252,6 +252,14 @@ button {
 
 /* ---------- 列表 ---------- */
 
+/* 雷达面板容器：筛选条 + 列表，随视图 v-show 切换 */
+.radar-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .list {
   flex: 1;
   overflow-y: auto;
@@ -456,6 +464,15 @@ button {
   border-radius: 4px;
   background: linear-gradient(90deg, var(--cyan), var(--amber));
   transition: width 0.15s linear;
+}
+
+/* 暂停/失败状态给进度条换色，一眼可辨 */
+.dl[data-status="paused"] .fill {
+  background: linear-gradient(90deg, #d99a3a, var(--amber));
+}
+
+.dl[data-status="error"] .fill {
+  background: var(--red);
 }
 
 .dl .bar.indet .fill {
@@ -792,7 +809,8 @@ button {
   letter-spacing: 0.05em;
 }
 
-.field input,
+/* 文本类输入才拉满整行；radio/checkbox 跟随原生尺寸（如安装包单选列表） */
+.field input:not([type="radio"]):not([type="checkbox"]),
 .field textarea {
   background: var(--bg0);
   border: 1px solid var(--line);
@@ -930,6 +948,213 @@ button {
   padding: 1px 7px;
 }
 
+/* ---------- Aurora 自更新弹窗 ---------- */
+
+.self-versions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.release-notes {
+  margin: 0;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 12px;
+  max-height: 190px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text1);
+  user-select: text;
+  scrollbar-width: thin;
+}
+
+.asset-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- VSCode 插件面板 ---------- */
+
+.vscode-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 2px 26px 12px;
+}
+
+.vc-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+}
+
+.vrow {
+  display: grid;
+  /* 操作列固定宽度：无论该行是「定位」还是「下载+定位」，版本列都保持垂直对齐 */
+  grid-template-columns: minmax(200px, 1.6fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) 148px;
+  gap: 12px;
+  align-items: center;
+  background: var(--bg1);
+  border: 1px solid #3c4a70;
+  border-radius: 10px;
+  padding: 9px 14px;
+  position: relative;
+}
+
+.vrow:hover {
+  border-color: #4d5c8b;
+  background: var(--bg2);
+}
+
+.vrow::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.vrow[data-status="update"]::before {
+  background: var(--amber);
+}
+
+.vrow[data-status="uptodate"]::before {
+  background: var(--green);
+}
+
+.vrow[data-status="error"]::before {
+  background: var(--red);
+}
+
+.vrow .vid {
+  font-size: 12.5px;
+  color: var(--text0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .vsub {
+  font-size: 11px;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .ver {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .ver.hot {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+.vrow .ver.ok {
+  color: var(--green);
+}
+
+.vrow .vops {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.vrow .dl-inline {
+  grid-column: 1 / -1;
+}
+
+.vrow-empty {
+  color: var(--text2);
+  text-align: center;
+  padding: 72px 0 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  font-size: 13.5px;
+}
+
+/* 顶栏视图切换 */
+.top-actions .view-seg {
+  margin-right: 6px;
+}
+
+/* 设置页开关与版本展示 */
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.inline-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--amber);
+}
+
+.ver-show {
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  color: var(--text1);
+}
+
+/* 状态栏版本入口 */
+.selfver {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selfver .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(247, 174, 69, 0.8);
+}
+
+/* VSCode 行首列 */
+.vmain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vid .pill {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
 /* ---------- Toast ---------- */
 
 .toasts {
@@ -956,10 +1181,16 @@ button {
 
 .toast.ok {
   border-color: rgba(75, 214, 149, 0.45);
+  box-shadow: inset 3px 0 0 var(--green), 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
 .toast.err {
   border-color: rgba(245, 110, 128, 0.5);
+  box-shadow: inset 3px 0 0 var(--red), 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.toast.info {
+  box-shadow: inset 3px 0 0 var(--cyan), 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
 @keyframes drop {

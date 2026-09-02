@@ -1,8 +1,9 @@
 mod model;
 mod net;
 mod version;
+mod vscode;
 
-use model::{CheckOutcome, Config, Settings, SoftwareItem};
+use model::{AppInfo, CheckOutcome, Config, SelfUpdateInfo, Settings, SoftwareItem};
 use tauri::{AppHandle, Manager};
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -21,6 +22,14 @@ fn normalize_settings(app: &AppHandle, s: &mut Settings) {
     }
     if s.github_api_base.trim().is_empty() {
         s.github_api_base = "https://api.github.com".into();
+    }
+    // VSCode 备份目录默认放在下载目录下
+    if s.vscode_dir.trim().is_empty() && !s.download_dir.trim().is_empty() {
+        s.vscode_dir = format!(
+            "{}{}vscode",
+            s.download_dir.trim_end_matches(['/', '\\']),
+            std::path::MAIN_SEPARATOR
+        );
     }
 }
 
@@ -62,6 +71,31 @@ async fn check_item(item: SoftwareItem, settings: Settings) -> Result<CheckOutco
     Ok(net::check_item(&item, &settings).await)
 }
 
+/// 当前应用版本与自更新仓库
+#[tauri::command]
+fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        repo: model::SELF_REPO.into(),
+    }
+}
+
+/// 检查 Aurora 自身的更新（GitHub Releases）
+#[tauri::command]
+async fn check_self_update(app: AppHandle, settings: Settings) -> SelfUpdateInfo {
+    let current = app.package_info().version.to_string();
+    net::check_self_update(&current, &settings).await
+}
+
+/// 后台拉起系统程序（资源管理器/浏览器），不等待其退出
+fn spawn_open(program: &str, arg: &str) -> Result<(), String> {
+    std::process::Command::new(program)
+        .arg(arg)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// 用资源管理器打开目录；reveal 为 true 时定位到文件
 #[tauri::command]
 fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
@@ -72,32 +106,19 @@ fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         if reveal.unwrap_or(false) {
-            std::process::Command::new("explorer")
-                .arg(format!("/select,{p}"))
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            spawn_open("explorer", &format!("/select,{p}"))
         } else {
-            std::process::Command::new("explorer")
-                .arg(p)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            spawn_open("explorer", p)
         }
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(p)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("open", p)
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(p)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("xdg-open", p)
     }
-    Ok(())
 }
 
 /// 用系统默认浏览器打开链接
@@ -109,26 +130,16 @@ fn open_url(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("explorer", u)
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("open", u)
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("xdg-open", u)
     }
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -139,9 +150,15 @@ pub fn run() {
             load_data,
             save_data,
             check_item,
+            app_info,
+            check_self_update,
             net::download_file,
+            net::pause_download,
             net::cancel_download,
             net::list_downloads,
+            vscode::list_vsix,
+            vscode::read_installed_extensions,
+            vscode::check_vscode_updates,
             open_path,
             open_url
         ])
