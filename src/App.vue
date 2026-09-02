@@ -47,6 +47,8 @@ const pickerItem = ref<SoftItem | null>(null);
 /** 主视图切换：软件雷达 / VSCode 插件 */
 const view = ref<"radar" | "vscode">("radar");
 const vsStats = ref({ total: 0, updates: 0 });
+/** VSCode 面板实例：顶栏的 扫描/检查全部 直接调面板的 scan/check */
+const vsPanel = ref<InstanceType<typeof VscodePanel> | null>(null);
 
 /** Aurora 自身更新 */
 const SELF_DL_ID = "aurora-self-update";
@@ -458,10 +460,19 @@ function openLocal(path: string, reveal = false) {
             VSCode 插件
           </button>
         </div>
+        <button class="btn ghost" @click="settingsOpen = true">设置</button>
         <button v-if="view === 'radar'" class="btn ghost" @click="openAdd">
           ＋ 添加软件
         </button>
-        <button class="btn ghost" @click="settingsOpen = true">设置</button>
+        <button
+          v-else
+          class="btn ghost"
+          :disabled="vsPanel?.busy.scanning || !config.settings.vscodeDir.trim()"
+          @click="vsPanel?.scan()"
+        >
+          <span v-if="vsPanel?.busy.scanning" class="spin" aria-hidden="true"></span>
+          扫描
+        </button>
         <button
           v-if="view === 'radar'"
           class="btn primary"
@@ -474,6 +485,15 @@ function openLocal(path: string, reveal = false) {
               ? `检查中 ${checkAllDone}/${config.items.length}`
               : "检查全部"
           }}
+        </button>
+        <button
+          v-else
+          class="btn primary"
+          :disabled="vsPanel?.busy.checking || vsPanel?.busy.scanning || !vsStats.total"
+          @click="vsPanel?.check()"
+        >
+          <span v-if="vsPanel?.busy.checking" class="spin light" aria-hidden="true"></span>
+          {{ vsPanel?.busy.checking ? "检查中…" : "检查全部" }}
         </button>
       </div>
     </header>
@@ -535,6 +555,7 @@ function openLocal(path: string, reveal = false) {
 
     <VscodePanel
       v-else
+      ref="vsPanel"
       :settings="config.settings"
       @open-settings="settingsOpen = true"
       @open-path="openLocal"
@@ -563,6 +584,14 @@ function openLocal(path: string, reveal = false) {
         @click="openLocal(config.settings.downloadDir)"
       >
         下载目录：{{ config.settings.downloadDir }}
+      </button>
+      <button
+        v-else-if="view === 'vscode' && config.settings.vscodeDir"
+        class="linklike"
+        title="打开插件备份目录"
+        @click="openLocal(config.settings.vscodeDir)"
+      >
+        备份目录：{{ config.settings.vscodeDir }}
       </button>
       <button
         class="linklike selfver"

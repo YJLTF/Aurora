@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api";
 import type { DownloadProgress, Settings, VsixCheck } from "../types";
 import { joinPath } from "../utils";
@@ -26,8 +26,7 @@ type VStatus = "idle" | "update" | "uptodate" | "error";
 const rows = ref<VsRow[]>([]);
 const installed = ref<Record<string, string>>({});
 const checks = ref<Record<string, VsixCheck>>({});
-const scanning = ref(false);
-const checking = ref(false);
+const busy = reactive({ scanning: false, checking: false });
 const scanned = ref(false);
 const scanError = ref("");
 const downloads = ref<Record<string, DownloadProgress>>({});
@@ -46,8 +45,8 @@ onMounted(() => {
 
 /** 扫描备份目录并读取本机已安装版本；同名插件保留最高版本 */
 async function scan() {
-  if (scanning.value || !dir.value) return;
-  scanning.value = true;
+  if (busy.scanning || !dir.value) return;
+  busy.scanning = true;
   scanError.value = "";
   try {
     const files = await api.listVsix(dir.value);
@@ -68,14 +67,14 @@ async function scan() {
   } catch (e) {
     scanError.value = String(e);
   } finally {
-    scanning.value = false;
+    busy.scanning = false;
   }
 }
 
 /** 批量到 Marketplace 查最新版本 */
 async function check() {
-  if (checking.value || !rows.value.length) return;
-  checking.value = true;
+  if (busy.checking || !rows.value.length) return;
+  busy.checking = true;
   try {
     const items = rows.value.map((r) => ({
       id: r.id,
@@ -100,9 +99,12 @@ async function check() {
   } catch (e) {
     emit("notify", `检查更新失败: ${e}`, "err");
   } finally {
-    checking.value = false;
+    busy.checking = false;
   }
 }
+
+/** 供顶栏按钮调用（扫描 / 检查全部） */
+defineExpose({ scan, check, busy });
 
 function statusOf(r: VsRow): VStatus {
   const c = checks.value[r.id.toLowerCase()];
@@ -160,35 +162,6 @@ function pctOf(p: DownloadProgress): number {
 
 <template>
   <div class="vscode-wrap">
-    <div class="vc-head">
-      <button
-        v-if="dir"
-        class="linklike vc-dir"
-        title="打开备份目录"
-        @click="emit('openPath', dir)"
-      >
-        备份目录：{{ dir }}
-      </button>
-      <span class="vc-summary">
-        <template v-if="rows.length"
-          >{{ rows.length }} 个插件 · {{ updateCount }} 个可更新</template
-        >
-      </span>
-      <span class="vc-spacer"></span>
-      <button class="btn ghost sm" :disabled="scanning || !dir" @click="scan">
-        <span v-if="scanning" class="spin" aria-hidden="true"></span>
-        扫描
-      </button>
-      <button
-        class="btn primary sm"
-        :disabled="checking || scanning || !rows.length"
-        @click="check"
-      >
-        <span v-if="checking" class="spin light" aria-hidden="true"></span>
-        检查更新
-      </button>
-    </div>
-
     <div v-if="scanError" class="err">{{ scanError }}</div>
 
     <div v-if="!dir" class="vrow-empty">
