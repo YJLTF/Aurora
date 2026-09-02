@@ -984,7 +984,8 @@ button {
 
 .vrow {
   display: grid;
-  grid-template-columns: minmax(200px, 1.6fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) auto;
+  /* 操作列固定宽度：无论该行是「定位」还是「下载+定位」，版本列都保持垂直对齐 */
+  grid-template-columns: minmax(200px, 1.6fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) 148px;
   gap: 12px;
   align-items: center;
   background: var(--bg1);
