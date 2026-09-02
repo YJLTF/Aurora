@@ -46,7 +46,7 @@ src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 pa
 - **VSCode 页**：清单来自递归扫描 `.vsix` 文件名（解析规则见 `vscode.rs::parse_stem`，含平台后缀剥离）；检查结果由前端写入 `config.vscodeChecks` 持久化，重扫描时按新本地版本重算 `hasUpdate`。面板随视图常驻（`v-show`），`defineExpose({ scan, check, busy })` 供顶栏调用。
 - **NPM 页**：全局目录 = 设置手填 `npmGlobalRoot` 优先，否则执行 `npm root -g`（每次扫描重新探测，不缓存路径）；清单读各包 `package.json` 的 name/version（不解析目录名，天然规避别名包），`@scope` 进一层；检查走 `{registry}/-/package/<name>/dist-tags` 取 `latest`（scoped 名 URL 编码为 `@scope%2Fname`），结果写入 `config.npmChecks` 持久化。升级动作两档：「执行更新」= 后端 `npm install -g <包>@latest`（全局串行 `UPGRADE_LOCK`，输出逐行 emit 事件，取消杀进程树，done 回填新版本）与「复制命令」。
 - **浏览器预览**：任何新命令都要在 `api.ts` 里同时写 Tauri 分支与 mock 分支，保证 `npm run dev` 可用。
-- **界面语言**：全中文；深蓝主题变量见 `style.css` 顶部 `:root`；新 UI 优先复用既有 class（btn/pill/dl/chip…），不要引入组件库。
+- **界面语言**：全中文；深蓝主题变量见 `style.css` 顶部 `:root`；新 UI 优先复用既有 class（btn/pill/dl/chip…），不要引入组件库。滚动条统一由 style.css 顶部的全局规则控制（`scrollbar-width: thin` + 主题色），不要在局部再写。
 
 ## 验证清单（提交前）
 
