@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { api } from "../api";
 import { compareVersion } from "../types";
-import type { NpmCheck, Settings } from "../types";
+import type { NpmCheck, NpmUpgradeProgress, Settings } from "../types";
 import { timeAgo } from "../utils";
 
 const props = defineProps<{
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (e: "notify", text: string, kind: "ok" | "err" | "info"): void;
   (e: "stats", total: number, updates: number): void;
   (e: "saveChecks", checks: NpmCheck[]): void;
+  (e: "rootChange", root: string): void;
 }>();
 
 interface NpmRow {
@@ -38,6 +39,20 @@ const scanned = ref(false);
 const scanError = ref("");
 const root = ref("");
 
+/** 进行中的升级（包名 → 状态），后端 npm install -g 全局串行 */
+type UpgStatus = NpmUpgradeProgress["status"];
+interface UpgState {
+  status: UpgStatus;
+  output: string;
+  error: string;
+}
+const upgrades = ref<Record<string, UpgState>>({});
+const anyUpgrading = computed(() =>
+  Object.values(upgrades.value).some(
+    (u) => u.status === "preparing" || u.status === "progressing",
+  ),
+);
+
 // 面板随视图常驻，手动全局目录变更时自动重扫
 watch(
   () => props.settings.npmGlobalRoot,
@@ -54,6 +69,7 @@ async function scan() {
   scanError.value = "";
   try {
     root.value = await api.npmDetectRoot(props.settings.npmGlobalRoot);
+    emit("rootChange", root.value);
     rows.value = await api.scanNpm(root.value);
     scanned.value = true;
     // 检查结果跨扫描保留：首次扫描恢复上次会话的结果，之后按新本地版本重算
@@ -66,6 +82,7 @@ async function scan() {
     scanError.value = String(e);
     rows.value = [];
     scanned.value = false;
+    emit("rootChange", "");
     emitStats();
   } finally {
     busy.scanning = false;
@@ -121,11 +138,8 @@ async function check() {
   }
 }
 
-/** 供顶栏按钮调用（扫描 / 检查全部） */
-defineExpose({ scan, check, busy });
-
-function statusOf(r: NpmRow): NStatus {
-  const c = checks.value[r.name.toLowerCase()];
+/** 供顶栏按钮调用（扫描 / 检查全部 / 升级进度回流），文末 defineExpose */
+function statusOf(r: NpmRow): NStatus {  const c = checks.value[r.name.toLowerCase()];
   if (!c) return "idle";
   if (c.error) return "error";
   return c.hasUpdate ? "update" : "uptodate";
@@ -172,9 +186,98 @@ function npmPageUrl(name: string): string {
   return `https://www.npmjs.com/package/${name}`;
 }
 
+function upgradeOf(r: NpmRow): UpgState | null {
+  return upgrades.value[r.name] ?? null;
+}
+
+const upgLabel: Record<UpgStatus, string> = {
+  preparing: "正在准备…",
+  progressing: "正在安装…",
+  done: "升级完成",
+  error: "升级失败",
+  cancelled: "已取消",
+};
+
+/** 执行更新：后端 npm install -g，进度经 onUpgrade 事件回流（全局串行） */
+function upgrade(r: NpmRow) {
+  if (anyUpgrading.value) return;
+  upgrades.value[r.name] = { status: "preparing", output: "", error: "" };
+  api.npmUpgrade(r.name, props.settings.npmGlobalRoot).catch((e) => {
+    // 命令本身被拒（如包名校验失败），事件流不会再来终态
+    const cur = upgrades.value[r.name];
+    if (cur && cur.status !== "done") {
+      upgrades.value[r.name] = { ...cur, status: "error", error: String(e) };
+    }
+  });
+}
+
+function cancelUpgrade(r: NpmRow) {
+  api.npmCancelUpgrade(r.name).catch(() => {});
+}
+
+function dismissUpgrade(r: NpmRow) {
+  delete upgrades.value[r.name];
+}
+
+/** 升级进度回流（App.vue 全局订阅后转发，面板可能已重扫过） */
+function handleUpgrade(p: NpmUpgradeProgress) {
+  const cur = upgrades.value[p.name];
+  if (p.status === "preparing") {
+    upgrades.value[p.name] = { status: p.status, output: "", error: "" };
+    return;
+  }
+  if (p.status === "progressing") {
+    if (cur) upgrades.value[p.name] = { ...cur, status: p.status, output: p.output };
+    return;
+  }
+  // 终态（后端终态事件不带 output，保留此前最后一行输出供查看）
+  const output = p.output || cur?.output || "";
+  if (p.status === "done") {
+    upgrades.value[p.name] = { status: "done", output, error: "" };
+    const row = rows.value.find((r) => r.name === p.name);
+    if (row && p.localVersion) row.version = p.localVersion;
+    const c = checks.value[p.name.toLowerCase()];
+    if (c && row) {
+      c.localVersion = row.version;
+      c.hasUpdate = c.latestVersion
+        ? compareVersion(c.latestVersion, row.version) > 0
+        : c.hasUpdate;
+      emit(
+        "saveChecks",
+        rows.value
+          .map((r) => checks.value[r.name.toLowerCase()])
+          .filter((x): x is NpmCheck => !!x)
+          .map((x) => ({ ...x })),
+      );
+    }
+    if (p.localVersion) {
+      emit("notify", `${p.name} 已升级到 ${p.localVersion}`, "ok");
+    } else {
+      emit("notify", `${p.name} 升级完成，重新扫描可刷新版本`, "ok");
+    }
+    recomputeHasUpdate();
+    emitStats();
+    setTimeout(() => {
+      if (upgrades.value[p.name]?.status === "done") delete upgrades.value[p.name];
+    }, 2500);
+  } else if (p.status === "cancelled") {
+    upgrades.value[p.name] = { status: "cancelled", output, error: "" };
+    emit("notify", `${p.name} 升级已取消`, "info");
+    setTimeout(() => {
+      if (upgrades.value[p.name]?.status === "cancelled") delete upgrades.value[p.name];
+    }, 2000);
+  } else {
+    upgrades.value[p.name] = { status: "error", output, error: p.error || "升级失败" };
+    emit("notify", `${p.name} 升级失败：${p.error || "详见输出"}`, "err");
+  }
+}
+
 function emitStats() {
   emit("stats", rows.value.length, updateCount.value);
 }
+
+/** 供顶栏与 App 调用（扫描 / 检查全部 / 升级进度回流） */
+defineExpose({ scan, check, busy, handleUpgrade });
 </script>
 
 <template>
@@ -222,20 +325,52 @@ function emitStats() {
           </div>
         </div>
         <div class="vops">
-          <button
-            v-if="r.status === 'update'"
-            class="btn primary sm"
-            :title="`复制升级命令 ${upgradeCmd(r)}`"
-            @click="copyUpgrade(r)"
-          >
-            复制命令
-          </button>
+          <template v-if="r.status === 'update' && !upgradeOf(r)">
+            <button
+              class="btn primary sm"
+              :title="anyUpgrading ? '已有升级任务进行中' : `执行 ${upgradeCmd(r)}`"
+              :disabled="anyUpgrading"
+              @click="upgrade(r)"
+            >
+              执行更新
+            </button>
+            <button
+              class="btn ghost sm"
+              :title="`复制升级命令 ${upgradeCmd(r)}`"
+              @click="copyUpgrade(r)"
+            >
+              复制命令
+            </button>
+          </template>
           <button
             class="btn ghost sm"
             title="在浏览器打开 npm 包页面"
             @click="emit('openUrl', npmPageUrl(r.name))"
           >
             主页
+          </button>
+        </div>
+        <div v-if="upgradeOf(r)" class="dl-inline upg">
+          <span
+            class="upg-label"
+            :class="{ err: upgradeOf(r)!.status === 'error' }"
+          >{{ upgLabel[upgradeOf(r)!.status] }}</span>
+          <span class="upg-output" :title="upgradeOf(r)!.error || upgradeOf(r)!.output">
+            {{ upgradeOf(r)!.output || upgradeOf(r)!.error || "…" }}
+          </span>
+          <button
+            v-if="upgradeOf(r)!.status === 'preparing' || upgradeOf(r)!.status === 'progressing'"
+            class="btn ghost sm"
+            @click="cancelUpgrade(r)"
+          >
+            取消
+          </button>
+          <button
+            v-else-if="upgradeOf(r)!.status === 'error'"
+            class="btn ghost sm"
+            @click="dismissUpgrade(r)"
+          >
+            关闭
           </button>
         </div>
       </div>

@@ -1107,7 +1107,34 @@ button {
 }
 
 .npm-list .vrow {
-  grid-template-columns: minmax(200px, 1.6fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) 168px;
+  grid-template-columns: minmax(200px, 1.6fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) 244px;
+}
+
+/* npm 升级进度行：复用 dl-inline 的跨列定位，内容为状态文案 + 最近输出 */
+.npm-list .upg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.upg .upg-label {
+  color: var(--text1);
+  white-space: nowrap;
+}
+
+.upg .upg-label.err {
+  color: var(--red);
+}
+
+.upg .upg-output {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  color: var(--text2);
 }
 
 /* 顶栏视图切换 */

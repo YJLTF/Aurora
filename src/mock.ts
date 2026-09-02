@@ -11,6 +11,7 @@ import type {
   NpmCheck,
   NpmInfo,
   NpmRef,
+  NpmUpgradeProgress,
   SelfUpdateInfo,
   SoftItem,
   Settings,
@@ -282,5 +283,43 @@ export async function mockNpmChecks(items: NpmRef[]): Promise<NpmCheck[]> {
       checkedAt: now,
       error: latest ? "" : "模拟数据中无此包",
     };
+  });
+}
+
+/** 模拟升级的取消标记（包名小写） */
+const NPM_UPGRADE_CANCELLED = new Set<string>();
+
+export function mockNpmCancelUpgrade(name: string): void {
+  NPM_UPGRADE_CANCELLED.add(name.toLowerCase());
+}
+
+export async function mockNpmUpgrade(
+  name: string,
+  emit: (p: NpmUpgradeProgress) => void,
+): Promise<void> {
+  const key = name.toLowerCase();
+  NPM_UPGRADE_CANCELLED.delete(key);
+  emit({ name, status: "preparing", output: "", error: "", localVersion: "" });
+  const steps = ["⠋ idealTree:dev 依赖计算", "reify:提取 tar 包内容", "run @latest postinstall", "link 全局 bin 链接"];
+  for (const step of steps) {
+    await wait(450);
+    if (NPM_UPGRADE_CANCELLED.has(key)) {
+      emit({ name, status: "cancelled", output: "", error: "", localVersion: "" });
+      return;
+    }
+    emit({ name, status: "progressing", output: step, error: "", localVersion: "" });
+  }
+  await wait(400);
+  if (NPM_UPGRADE_CANCELLED.has(key)) {
+    emit({ name, status: "cancelled", output: "", error: "", localVersion: "" });
+    return;
+  }
+  const latest = NPM_LATEST[key] ?? "";
+  emit({
+    name,
+    status: "done",
+    output: `added 1 package in ${(2 + Math.random() * 3).toFixed(0)}s`,
+    error: "",
+    localVersion: latest,
   });
 }

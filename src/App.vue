@@ -46,6 +46,8 @@ const vsStats = ref({ total: 0, updates: 0 });
 /** NPM 面板：顶栏按钮直调其 scan/check */
 const npmPanel = ref<InstanceType<typeof NpmPanel> | null>(null);
 const npmStats = ref({ total: 0, updates: 0 });
+/** 探测到的 npm 全局目录（状态栏展示与打开） */
+const npmRoot = ref("");
 
 /** Aurora 自身更新 */
 const SELF_DL_ID = "aurora-self-update";
@@ -109,6 +111,8 @@ onMounted(async () => {
       if (p.itemId !== SELF_DL_ID) radarPanel.value?.handleDone(p);
     }
   });
+  // npm 升级进度同样全局唯一订阅，转交 NpmPanel 消化
+  await api.onUpgrade((p) => npmPanel.value?.handleUpgrade(p));
 });
 
 /** 检查 Aurora 自身更新；silent 为启动时的静默检查 */
@@ -330,6 +334,7 @@ function openLocal(path: string, reveal = false) {
       @notify="toast"
       @stats="(t: number, u: number) => (npmStats = { total: t, updates: u })"
       @save-checks="saveNpmChecks"
+      @root-change="(r: string) => (npmRoot = r)"
     />
 
     <footer class="statusbar">
@@ -367,6 +372,14 @@ function openLocal(path: string, reveal = false) {
         @click="openLocal(config.settings.vscodeDir)"
       >
         备份目录：{{ config.settings.vscodeDir }}
+      </button>
+      <button
+        v-else-if="view === 'npm' && npmRoot"
+        class="linklike"
+        title="打开 npm 全局目录"
+        @click="openLocal(npmRoot)"
+      >
+        全局目录：{{ npmRoot }}
       </button>
       <button
         class="linklike selfver"

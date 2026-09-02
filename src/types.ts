@@ -110,6 +110,17 @@ export interface NpmCheck {
   error: string;
 }
 
+/** npm 升级进度（npm-upgrade-progress 事件载荷） */
+export interface NpmUpgradeProgress {
+  name: string;
+  status: "preparing" | "progressing" | "done" | "error" | "cancelled";
+  /** 最近一行 npm 输出（error 时为错误摘要） */
+  output: string;
+  error: string;
+  /** done 时回填升级后的本地版本（读不到为空） */
+  localVersion: string;
+}
+
 export interface Config {
   settings: Settings;
   items: SoftItem[];
