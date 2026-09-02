@@ -1,5 +1,5 @@
 import type { CheckOutcome, Config, DownloadProgress, SoftItem } from "./types";
-import { mockConfig, mockCheck, mockDownload } from "./mock";
+import { mockConfig, mockCheck, mockDownload, mockDownloadList } from "./mock";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -39,6 +39,12 @@ export const api = {
   download(args: DownloadArgs): Promise<string> {
     if (!isTauri) return mockDownload(args, (p) => mockHandlers.forEach((h) => h(p)));
     return call<string>("download_file", args);
+  },
+
+  /** 列出下载目录中的文件名（目录不存在时返回空） */
+  listDownloads(destDir: string): Promise<string[]> {
+    if (!isTauri) return Promise.resolve(mockDownloadList());
+    return call<string[]>("list_downloads", { destDir });
   },
 
   cancel(itemId: string): Promise<void> {

@@ -11,6 +11,9 @@
   - 页面 / 接口解析：对任意 URL 的响应文本做正则提取版本号，可配置 `{version}` 下载直链模板（VS Code、思源笔记等即用此方式）
 - **一键检查全部**：并发检测，可更新的软件自动置顶，版本跃迁 `本地 → 最新` 一目了然
 - **升级包下载**：自动按 Windows 相关性推荐安装包（x64/setup/exe 优先，排除 arm64/macOS/校验文件），也可手动挑选；实时进度、可取消、下载完成可直接打开文件所在目录
+- **已下载安装包识别**：检查时扫描下载目录，若最新版本的安装包已经下载过，行内显示"✓ 最新版本安装包已下载"并可一键在资源管理器中定位，避免重复下载
+  - 文件名含版本号的按版本匹配；下载时若安装包文件名不含版本号会自动追加到扩展名前（如 `Hoppscotch_win_x64.exe` → `Hoppscotch_win_x64-25.7.0.exe`），确保日后能识别
+  - 兼容历史无版本文件：按"去掉版本后的文件名骨架"匹配
 - **本地版本登记**：未登记时显示"待登记"；登记后自动判定 可更新 / 已最新；行内即可编辑，或一键"设为已装"
 - **针对国内网络的设置**：GitHub API 镜像地址、下载加速前缀（仅作用于 github.com 直链）、可选 Token（避免 60 次/小时限流）
 
@@ -59,9 +62,9 @@ npm run dev        # 打开 http://localhost:5173
 src/                  Vue 3 前端（列表/编辑/设置/安装包选择组件）
 src/api.ts            Tauri invoke 封装（浏览器预览时自动切换 mock）
 src-tauri/src/
-  lib.rs              Tauri 命令：load/save 配置、check、open_path/open_url
+  lib.rs              Tauri 命令注册：load/save 配置、check、open_path/open_url
   model.rs            数据模型、Windows 附件评分、预置清单
-  net.rs              GitHub/HTML 检测、流式下载（进度事件、取消、断点清理）
+  net.rs              GitHub/HTML 检测、流式下载（进度事件、取消）、下载目录扫描
   version.rs          宽松版本比较（兼容日期版本号、预发布后缀）
 scripts/gen_icons.py  图标生成脚本（PNG/ICO）
 ```

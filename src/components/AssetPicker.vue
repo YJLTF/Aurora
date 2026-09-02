@@ -22,7 +22,7 @@ function picked(): Asset | null {
     <div class="dialog narrow" role="dialog" aria-modal="true" aria-label="选择安装包">
       <header class="dlg-head">
         <h2>选择安装包 · {{ item.name }}</h2>
-        <button class="iconbtn ghost" title="关闭" @click="emit('close')">✕</button>
+        <button class="btn ghost iconbtn" title="关闭" @click="emit('close')">✕</button>
       </header>
 
       <div class="dlg-body asset-list">

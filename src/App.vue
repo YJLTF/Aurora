@@ -10,7 +10,7 @@ import type {
   Settings,
   SoftItem,
 } from "./types";
-import { slugify } from "./utils";
+import { containsVersion, joinPath, matchDownloaded, slugify } from "./utils";
 import SoftRow from "./components/SoftRow.vue";
 import ItemEditor from "./components/ItemEditor.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
@@ -30,6 +30,7 @@ const checkingIds = reactive(new Set<string>());
 const downloadingIds = reactive(new Set<string>());
 const downloads = ref<Record<string, DownloadProgress>>({});
 const donePaths = ref<Record<string, string>>({});
+const downloadedFiles = ref<string[]>([]);
 const checkAllRunning = ref(false);
 const checkAllDone = ref(0);
 const filter = ref<"all" | "update" | "untracked" | "error" | "uptodate">("all");
@@ -79,6 +80,7 @@ onMounted(async () => {
     toast(`读取配置失败: ${e}`, "err");
   }
   ready.value = true;
+  void refreshDownloaded();
   await api.onProgress((p) => {
     if (p.status === "progressing") {
       downloads.value[p.itemId] = p;
@@ -88,6 +90,7 @@ onMounted(async () => {
       donePaths.value[p.itemId] = p.path;
       toast(`${p.fileName} 下载完成`, "ok");
       setTimeout(() => delete donePaths.value[p.itemId], 60_000);
+      void refreshDownloaded();
     } else if (p.status === "cancelled") {
       delete downloads.value[p.itemId];
       downloadingIds.delete(p.itemId);
@@ -195,9 +198,49 @@ async function checkAll() {
 }
 
 function pickFileName(item: SoftItem, a: Asset): string {
-  if (/\.[A-Za-z0-9]{1,6}$/.test(a.name)) return a.name;
-  return `${item.id || slugify(item.name) || "setup"}-${item.latestVersion}.exe`;
+  const ver = item.latestVersion.trim();
+  let name = a.name.trim();
+  if (!/\.[A-Za-z0-9]{1,6}$/.test(name)) {
+    return `${item.id || slugify(item.name) || "setup"}-${ver || "latest"}.exe`;
+  }
+  // 文件名不含版本信息时追加版本号，便于日后与下载目录中的文件匹配
+  if (ver && !containsVersion(stemOnly(name), ver)) {
+    const m = name.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
+    name = m ? `${m[1]}-${ver}${m[2]}` : `${name}-${ver}`;
+  }
+  return name;
 }
+
+function stemOnly(name: string): string {
+  return name.replace(/\.[A-Za-z0-9]{1,6}$/, "");
+}
+
+/** 扫描下载目录文件列表，配合 downloadedPaths 找出各软件已下载的最新安装包 */
+async function refreshDownloaded() {
+  const dir = config.value.settings.downloadDir.trim();
+  if (!dir) {
+    downloadedFiles.value = [];
+    return;
+  }
+  try {
+    downloadedFiles.value = await api.listDownloads(dir);
+  } catch {
+    downloadedFiles.value = [];
+  }
+}
+
+const downloadedPaths = computed<Record<string, string>>(() => {
+  const dir = config.value.settings.downloadDir.trim();
+  const map: Record<string, string> = {};
+  if (!dir || !downloadedFiles.value.length) return map;
+  for (const it of config.value.items) {
+    if (!it.latestVersion) continue;
+    const names = it.assets.map((a) => a.name).filter(Boolean);
+    const hit = matchDownloaded(downloadedFiles.value, it.latestVersion, names);
+    if (hit) map[it.id] = joinPath(dir, hit);
+  }
+  return map;
+});
 
 async function startDownload(item: SoftItem, asset?: Asset) {
   const a = asset ?? item.assets[item.suggested] ?? item.assets[0];
@@ -268,6 +311,7 @@ function saveSettings(s: Settings) {
   config.value.settings = s;
   settingsOpen.value = false;
   persist();
+  void refreshDownloaded();
   toast("设置已保存", "ok");
 }
 
@@ -280,9 +324,9 @@ function openUrl(url: string) {
   api.openUrl(url).catch((e) => toast(`打开链接失败: ${e}`, "err"));
 }
 
-function openLocal(path: string) {
+function openLocal(path: string, reveal = false) {
   if (!path) return;
-  api.open(path).catch((e) => toast(`打开路径失败: ${e}`, "err"));
+  api.open(path, reveal).catch((e) => toast(`打开路径失败: ${e}`, "err"));
 }
 </script>
 
@@ -293,17 +337,17 @@ function openLocal(path: string) {
         <svg class="radar" viewBox="0 0 48 48" width="32" height="32" aria-hidden="true">
           <defs>
             <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#f2a33c" stop-opacity="0.85" />
-              <stop offset="1" stop-color="#f2a33c" stop-opacity="0.05" />
+              <stop offset="0" stop-color="#f7ae45" stop-opacity="0.85" />
+              <stop offset="1" stop-color="#f7ae45" stop-opacity="0.05" />
             </linearGradient>
           </defs>
-          <circle cx="24" cy="24" r="20" fill="none" stroke="#2b3a5c" stroke-width="1.6" />
-          <circle cx="24" cy="24" r="12" fill="none" stroke="#2b3a5c" stroke-width="1.2" />
+          <circle cx="24" cy="24" r="20" fill="none" stroke="#4d5b8e" stroke-width="1.6" />
+          <circle cx="24" cy="24" r="12" fill="none" stroke="#4d5b8e" stroke-width="1.2" />
           <g class="sweep">
             <path d="M24 24 L24 4 A20 20 0 0 1 41.3 14 Z" fill="url(#sweepGrad)" />
           </g>
-          <circle cx="24" cy="24" r="2.6" fill="#53c1de" />
-          <circle cx="35" cy="31" r="2.4" fill="#f2a33c" />
+          <circle cx="24" cy="24" r="2.6" fill="#62cbe8" />
+          <circle cx="35" cy="31" r="2.4" fill="#f7ae45" />
         </svg>
         <div class="brand-text">
           <h1>Aurora</h1>
@@ -357,6 +401,7 @@ function openLocal(path: string) {
           :downloading="downloadingIds.has(it.id)"
           :dl="downloads[it.id] ?? null"
           :done-path="donePaths[it.id] ?? ''"
+          :downloaded-path="downloadedPaths[it.id] ?? ''"
           @check="checkOne(it)"
           @edit="openEdit(it)"
           @download="(a) => startDownload(it, a ?? undefined)"
@@ -369,7 +414,7 @@ function openLocal(path: string) {
               persist();
             }
           "
-          @open-path="(p) => openLocal(p)"
+          @open-path="(p, r) => openLocal(p, r)"
           @open-url="openUrl"
         />
       </template>

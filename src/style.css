@@ -1,22 +1,22 @@
 /* ============ Aurora · 软件更新雷达 ============ */
 
 :root {
-  --bg0: #0e1320;
-  --bg1: #141a2a;
-  --bg2: #1b2338;
-  --bg3: #212b45;
-  --line: #232e4a;
-  --text0: #e3e9f5;
-  --text1: #97a3bf;
-  --text2: #5e6b8c;
-  --amber: #f2a33c;
-  --amber-soft: rgba(242, 163, 60, 0.14);
-  --green: #3ecf8e;
-  --green-soft: rgba(62, 207, 142, 0.13);
-  --cyan: #53c1de;
-  --cyan-soft: rgba(83, 193, 222, 0.13);
-  --red: #ef5d6f;
-  --red-soft: rgba(239, 93, 111, 0.12);
+  --bg0: #252e4a;
+  --bg1: #2d3856;
+  --bg2: #374266;
+  --bg3: #414d75;
+  --line: #46547e;
+  --text0: #f0f4fd;
+  --text1: #bac6e2;
+  --text2: #8b99bd;
+  --amber: #f7ae45;
+  --amber-soft: rgba(247, 174, 69, 0.18);
+  --green: #4bd695;
+  --green-soft: rgba(75, 214, 149, 0.16);
+  --cyan: #62cbe8;
+  --cyan-soft: rgba(98, 203, 232, 0.16);
+  --red: #f56e80;
+  --red-soft: rgba(245, 110, 128, 0.15);
   --mono: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
   --sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
 }
@@ -74,7 +74,7 @@ button {
   gap: 16px;
   padding: 14px 20px 12px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, #131a2c 0%, var(--bg0) 100%);
+  background: linear-gradient(180deg, #2c3757 0%, var(--bg0) 100%);
 }
 
 .brand {
@@ -168,7 +168,7 @@ button {
 
 .btn.danger-ghost {
   background: transparent;
-  border-color: rgba(239, 93, 111, 0.4);
+  border-color: rgba(245, 110, 128, 0.4);
   color: var(--red);
 }
 
@@ -231,7 +231,7 @@ button {
 
 .chip.on {
   background: var(--bg3);
-  border-color: #33406a;
+  border-color: #52618f;
   color: var(--text0);
 }
 
@@ -281,7 +281,7 @@ button {
   display: grid;
   grid-template-columns: 46px minmax(210px, 1.2fr) minmax(280px, 1.5fr) auto;
   gap: 14px;
-  align-items: center;
+  align-items: start;
   background: var(--bg1);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -292,7 +292,7 @@ button {
 
 .row:hover {
   background: var(--bg2);
-  border-color: #2b3757;
+  border-color: #4d5c88;
 }
 
 .row::before {
@@ -310,7 +310,7 @@ button {
 .row[data-status="update"]::before {
   background: var(--amber);
   opacity: 1;
-  box-shadow: 0 0 8px rgba(242, 163, 60, 0.55);
+  box-shadow: 0 0 8px rgba(247, 174, 69, 0.55);
 }
 
 .row[data-status="uptodate"]::before {
@@ -329,6 +329,7 @@ button {
 .appicon {
   width: 40px;
   height: 40px;
+  margin-top: 2px;
   display: grid;
   place-items: center;
   font-size: 21px;
@@ -371,26 +372,26 @@ button {
 .pill.update {
   color: var(--amber);
   background: var(--amber-soft);
-  border-color: rgba(242, 163, 60, 0.35);
+  border-color: rgba(247, 174, 69, 0.35);
 }
 
 .pill.uptodate {
   color: var(--green);
   background: var(--green-soft);
-  border-color: rgba(62, 207, 142, 0.3);
+  border-color: rgba(75, 214, 149, 0.3);
 }
 
 .pill.error {
   color: var(--red);
   background: var(--red-soft);
-  border-color: rgba(239, 93, 111, 0.3);
+  border-color: rgba(245, 110, 128, 0.3);
 }
 
 .pill.untracked,
 .pill.checking {
   color: var(--cyan);
   background: var(--cyan-soft);
-  border-color: rgba(83, 193, 222, 0.3);
+  border-color: rgba(98, 203, 232, 0.3);
 }
 
 .sub {
@@ -512,7 +513,7 @@ button {
 
 .mini.danger:hover {
   color: var(--red);
-  border-color: rgba(239, 93, 111, 0.4);
+  border-color: rgba(245, 110, 128, 0.4);
 }
 
 /* 版本跃迁 */
@@ -521,6 +522,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-top: 2px;
   font-family: var(--mono);
   font-size: 13px;
   min-width: 0;
@@ -567,10 +569,21 @@ button {
   color: var(--text2);
 }
 
+.vline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vline .vval {
+  min-width: 0;
+}
+
 .vval.hot {
   color: var(--amber);
   font-weight: 700;
-  text-shadow: 0 0 14px rgba(242, 163, 60, 0.35);
+  text-shadow: 0 0 14px rgba(247, 174, 69, 0.35);
 }
 
 .vval.ok {
@@ -600,8 +613,7 @@ button {
 }
 
 .mark {
-  align-self: flex-start;
-  margin-top: 2px;
+  flex: none;
   background: none;
   border: none;
   color: var(--amber);
@@ -622,6 +634,22 @@ button {
   align-items: center;
   gap: 7px;
   justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* 固定各按钮宽度：下载钮是否带下拉箭头都不影响跨行对齐 */
+.ops .btn.sm {
+  min-width: 58px;
+  justify-content: center;
+}
+
+.ops .btn.primary.sm {
+  min-width: 74px;
+}
+
+.ops .iconbtn {
+  min-width: 34px;
+  justify-content: center;
 }
 
 .ops .primary {
@@ -676,7 +704,7 @@ button {
 
 .mocktag {
   color: var(--cyan);
-  border: 1px dashed rgba(83, 193, 222, 0.4);
+  border: 1px dashed rgba(98, 203, 232, 0.4);
   border-radius: 6px;
   padding: 1px 8px;
 }
@@ -686,7 +714,7 @@ button {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 7, 14, 0.62);
+  background: rgba(20, 26, 44, 0.55);
   backdrop-filter: blur(3px);
   display: grid;
   place-items: center;
@@ -699,7 +727,7 @@ button {
   display: flex;
   flex-direction: column;
   background: var(--bg1);
-  border: 1px solid #2c3959;
+  border: 1px solid #46547f;
   border-radius: 14px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 }
@@ -803,6 +831,11 @@ button {
   align-items: start;
 }
 
+/* 版本 + 主页行：版本定宽，主页地址较长占满剩余空间 */
+.frow.two.tail {
+  grid-template-columns: minmax(150px, 190px) 1fr;
+}
+
 .inrow {
   display: flex;
   gap: 8px;
@@ -863,7 +896,7 @@ button {
 }
 
 .asset:hover {
-  border-color: #33406a;
+  border-color: #52618f;
 }
 
 .asset.on {
@@ -892,7 +925,7 @@ button {
 .arec {
   font-size: 10.5px;
   color: var(--amber);
-  border: 1px solid rgba(242, 163, 60, 0.4);
+  border: 1px solid rgba(247, 174, 69, 0.4);
   border-radius: 999px;
   padding: 1px 7px;
 }
@@ -912,7 +945,7 @@ button {
 
 .toast {
   background: var(--bg3);
-  border: 1px solid #33406a;
+  border: 1px solid #52618f;
   color: var(--text0);
   border-radius: 10px;
   padding: 9px 14px;
@@ -922,11 +955,11 @@ button {
 }
 
 .toast.ok {
-  border-color: rgba(62, 207, 142, 0.45);
+  border-color: rgba(75, 214, 149, 0.45);
 }
 
 .toast.err {
-  border-color: rgba(239, 93, 111, 0.5);
+  border-color: rgba(245, 110, 128, 0.5);
 }
 
 @keyframes drop {

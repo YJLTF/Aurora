@@ -10,6 +10,7 @@ const props = defineProps<{
   downloading: boolean;
   dl: DownloadProgress | null;
   donePath: string;
+  downloadedPath: string;
 }>();
 
 const emit = defineEmits<{
@@ -20,7 +21,7 @@ const emit = defineEmits<{
   (e: "cancel"): void;
   (e: "mark"): void;
   (e: "setInstalled", version: string): void;
-  (e: "openPath", path: string): void;
+  (e: "openPath", path: string, reveal?: boolean): void;
   (e: "openUrl", url: string): void;
 }>();
 
@@ -63,6 +64,10 @@ const pct = computed(() => {
 
 const doneName = computed(
   () => props.donePath.split(/[\\/]/).pop() ?? props.donePath,
+);
+
+const downloadedName = computed(
+  () => props.downloadedPath.split(/[\\/]/).pop() ?? props.downloadedPath,
 );
 
 // 本地版本行内编辑
@@ -133,6 +138,23 @@ function commit() {
         <span class="dl-text" :title="donePath">{{ doneName }}</span>
         <button class="mini" @click="emit('openPath', donePath)">打开</button>
       </div>
+      <div
+        v-else-if="downloadedPath && status !== 'checking'"
+        class="dl-done"
+        role="status"
+      >
+        <span class="ok-mark">✓</span>
+        <span class="dl-text" :title="downloadedPath">
+          最新版本安装包已下载 · {{ downloadedName }}
+        </span>
+        <button
+          class="mini"
+          title="在资源管理器中定位该文件"
+          @click="emit('openPath', downloadedPath, true)"
+        >
+          定位
+        </button>
+      </div>
     </div>
 
     <div class="versions">
@@ -161,20 +183,22 @@ function commit() {
       <span class="varrow" :class="{ lit: status === 'update' }">→</span>
       <div class="vcell">
         <span class="vlabel">最新</span>
-        <span
-          class="vval"
-          :class="{ hot: status === 'update', ok: status === 'uptodate' }"
-        >
-          {{ latestLabel }}</span
-        >
-        <button
-          v-if="status === 'update'"
-          class="mark"
-          title="把最新版本登记为本地版本"
-          @click="emit('mark')"
-        >
-          设为已装
-        </button>
+        <div class="vline">
+          <span
+            class="vval"
+            :class="{ hot: status === 'update', ok: status === 'uptodate' }"
+          >
+            {{ latestLabel }}</span
+          >
+          <button
+            v-if="status === 'update'"
+            class="mark"
+            title="把最新版本登记为本地版本"
+            @click="emit('mark')"
+          >
+            设为已装
+          </button>
+        </div>
       </div>
     </div>
 

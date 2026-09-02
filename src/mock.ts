@@ -133,6 +133,17 @@ export async function mockDownload(
     emit({ itemId: args.itemId, fileName: name, received, total, status: "progressing", path: "", error: "" });
   }
   const path = `C:\\Users\\demo\\Downloads\\${name}`;
-  emit({ itemId: args.itemId, fileName: name, received: total, total, status: "done", path, error: "" });
+  emit({ itemId: args.itemId, fileName: name, received, total, status: "done", path, error: "" });
   return path;
+}
+
+/** 预置的“下载目录”文件列表：含版本命名与无版本历史文件两种样例 */
+export function mockDownloadList(): string[] {
+  return [
+    "Cherry-Studio-1.5.6-setup.exe",
+    "siyuan-3.8.2-win.exe",
+    "Hoppscotch_win_x64.exe",
+    "desktop.ini",
+    "readme.txt",
+  ];
 }

@@ -141,6 +141,7 @@ pub fn run() {
             check_item,
             net::download_file,
             net::cancel_download,
+            net::list_downloads,
             open_path,
             open_url
         ])

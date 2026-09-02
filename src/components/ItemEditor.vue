@@ -137,7 +137,7 @@ function save() {
     <div class="dialog" role="dialog" aria-modal="true" aria-label="编辑软件">
       <header class="dlg-head">
         <h2>{{ item ? "编辑软件" : "添加软件" }}</h2>
-        <button class="iconbtn ghost" title="关闭" @click="emit('close')">✕</button>
+        <button class="btn ghost iconbtn" title="关闭" @click="emit('close')">✕</button>
       </header>
 
       <div class="dlg-body">
@@ -201,7 +201,7 @@ function save() {
           </label>
         </template>
 
-        <div class="frow two">
+        <div class="frow two tail">
           <label class="field">
             <span class="flabel">本地已装版本</span>
             <input v-model="form.installedVersion" class="mono" placeholder="留空表示未登记" spellcheck="false" />

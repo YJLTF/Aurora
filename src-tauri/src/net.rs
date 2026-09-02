@@ -380,3 +380,33 @@ pub fn cancel_download(state: State<'_, AppState>, item_id: String) {
         flag.store(true, AtomicOrdering::Relaxed);
     }
 }
+
+/// 列出下载目录中的文件名，供前端匹配“最新版本是否已下载”。
+/// 目录不存在或不可读时返回空列表，不让检查流程报错。
+#[tauri::command]
+pub fn list_downloads(dest_dir: String) -> Result<Vec<String>, String> {
+    let dir = std::path::PathBuf::from(dest_dir.trim());
+    let mut out = Vec::new();
+    let rd = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(_) => return Ok(out),
+    };
+    for entry in rd.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if !ft.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+        if name.starts_with('.')
+            || lower.ends_with(".part")
+            || lower.ends_with(".tmp")
+            || lower.ends_with(".crdownload")
+        {
+            continue;
+        }
+        out.push(name);
+    }
+    out.sort();
+    Ok(out)
+}
