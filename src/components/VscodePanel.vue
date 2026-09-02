@@ -41,7 +41,7 @@ const dir = computed(() => props.settings.vscodeDir.trim());
 
 // 独立订阅下载进度；完成/失败提示由 App 的全局监听统一弹出
 void api.onProgress((p) => {
-  if (p.status === "progressing") downloads.value[p.itemId] = p;
+  if (p.status === "progressing" || p.status === "paused") downloads.value[p.itemId] = p;
   else delete downloads.value[p.itemId];
 });
 
@@ -169,21 +169,41 @@ function downloadOf(r: VsRow): DownloadProgress | null {
   return downloads.value[`vsix:${r.id}`] ?? null;
 }
 
+/** 进行中的下载不允许重复发起；暂停/失败状态允许重新入队续传 */
 async function download(r: VsRow) {
   const c = checks.value[r.id.toLowerCase()];
-  if (!c?.downloadUrl || downloadOf(r)) return;
+  const key = `vsix:${r.id}`;
+  const prev = downloads.value[key];
+  if (!c?.downloadUrl || prev?.status === "progressing") return;
   const name = `${r.id}-${c.latestVersion}${r.target ? `-${r.target}` : ""}.vsix`;
+  const args = {
+    itemId: key,
+    url: c.downloadUrl,
+    fileName: name,
+    destDir: r.dir,
+    proxyPrefix: props.settings.downloadProxy,
+    preferIpv4: true,
+  };
   try {
-    await api.download({
-      itemId: `vsix:${r.id}`,
-      url: c.downloadUrl,
-      fileName: name,
-      destDir: r.dir,
-      proxyPrefix: props.settings.downloadProxy,
-      preferIpv4: true,
-    });
+    await api.download(args);
   } catch (e) {
-    if (!String(e).includes("取消")) emit("notify", `${r.id} 下载失败：${e}`, "err");
+    const msg = String(e);
+    if (msg.includes("取消")) {
+      delete downloads.value[key];
+    } else if (msg.includes("暂停")) {
+      // 进度事件已置为 paused，保留状态供「继续」
+    } else {
+      downloads.value[key] = {
+        itemId: key,
+        fileName: prev?.fileName || name,
+        received: prev?.received ?? 0,
+        total: prev?.total ?? 0,
+        status: "error",
+        path: "",
+        error: msg,
+      };
+      emit("notify", `${r.id} 下载失败：${msg}`, "err");
+    }
   }
 }
 
@@ -194,6 +214,17 @@ function emitStats() {
 function pctOf(p: DownloadProgress): number {
   if (!p.total) return 0;
   return Math.min(100, Math.round((p.received / p.total) * 100));
+}
+
+function dlTextOf(r: VsRow): string {
+  const p = downloadOf(r);
+  if (!p) return "";
+  const size = p.total
+    ? `${pctOf(p)}% · ${(p.received / 1048576).toFixed(1)}/${(p.total / 1048576).toFixed(1)} MB`
+    : `${(p.received / 1048576).toFixed(1)} MB`;
+  if (p.status === "paused") return `${p.fileName} · 已暂停 · ${size}`;
+  if (p.status === "error") return `${p.fileName} · ${p.error}`;
+  return `${p.fileName} · ${size}`;
 }
 </script>
 
@@ -263,10 +294,22 @@ function pctOf(p: DownloadProgress): number {
             <div class="fill" :style="{ width: pctOf(downloadOf(r)!) + '%' }"></div>
           </div>
           <span class="dl-text">{{
-            downloadOf(r)!.total
-              ? `${downloadOf(r)!.fileName} · ${pctOf(downloadOf(r)!)}%`
-              : `${downloadOf(r)!.fileName} · ${(downloadOf(r)!.received / 1048576).toFixed(1)} MB`
+            dlTextOf(r)
           }}</span>
+          <button
+            v-if="downloadOf(r)!.status === 'progressing'"
+            class="mini"
+            @click="api.pause(`vsix:${r.id}`)"
+          >
+            暂停
+          </button>
+          <button
+            v-else-if="downloadOf(r)!.status === 'paused' || downloadOf(r)!.status === 'error'"
+            class="mini"
+            @click="download(r)"
+          >
+            {{ downloadOf(r)!.status === "paused" ? "继续" : "重试" }}
+          </button>
           <button class="mini danger" @click="api.cancel(`vsix:${r.id}`)">取消</button>
         </div>
       </div>

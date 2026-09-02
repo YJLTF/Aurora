@@ -104,7 +104,7 @@ export interface DownloadProgress {
   fileName: string;
   received: number;
   total: number;
-  status: "progressing" | "done" | "error" | "cancelled";
+  status: "progressing" | "paused" | "done" | "error" | "cancelled";
   path: string;
   error: string;
 }

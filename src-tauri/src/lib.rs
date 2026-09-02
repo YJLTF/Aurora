@@ -167,6 +167,7 @@ pub fn run() {
             app_info,
             check_self_update,
             net::download_file,
+            net::pause_download,
             net::cancel_download,
             net::list_downloads,
             vscode::list_vsix,

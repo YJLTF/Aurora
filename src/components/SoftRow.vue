@@ -19,6 +19,8 @@ const emit = defineEmits<{
   (e: "download", asset: Asset | null): void;
   (e: "pick"): void;
   (e: "cancel"): void;
+  (e: "pause"): void;
+  (e: "resume"): void;
   (e: "mark"): void;
   (e: "setInstalled", version: string): void;
   (e: "openPath", path: string, reveal?: boolean): void;
@@ -60,6 +62,18 @@ const pct = computed(() => {
   if (!d) return 0;
   if (!d.total) return 0;
   return Math.min(100, Math.round((d.received / d.total) * 100));
+});
+
+/** 进度条旁的状态文案：区分 下载中/已暂停/失败 */
+const dlText = computed(() => {
+  const d = props.dl;
+  if (!d) return "";
+  const size = d.total
+    ? `${pct.value}% · ${(d.received / 1048576).toFixed(1)}/${(d.total / 1048576).toFixed(1)} MB`
+    : `${(d.received / 1048576).toFixed(1)} MB`;
+  if (d.status === "paused") return `${d.fileName} · 已暂停 · ${size}`;
+  if (d.status === "error") return `${d.fileName} · ${d.error}`;
+  return `${d.fileName} · ${size}`;
 });
 
 const doneName = computed(
@@ -126,11 +140,21 @@ function commit() {
         <div class="bar" :class="{ indet: !dl.total }">
           <div class="fill" :style="{ width: pct + '%' }"></div>
         </div>
-        <span class="dl-text">{{
-          dl.total
-            ? `${dl.fileName} · ${pct}% · ${ (dl.received / 1048576).toFixed(1) }/${ (dl.total / 1048576).toFixed(1) } MB`
-            : `${dl.fileName} · ${(dl.received / 1048576).toFixed(1)} MB`
-        }}</span>
+        <span class="dl-text">{{ dlText }}</span>
+        <button
+          v-if="dl.status === 'progressing'"
+          class="mini"
+          @click="emit('pause')"
+        >
+          暂停
+        </button>
+        <button
+          v-else-if="dl.status === 'paused' || dl.status === 'error'"
+          class="mini"
+          @click="emit('resume')"
+        >
+          {{ dl.status === "paused" ? "继续" : "重试" }}
+        </button>
         <button class="mini danger" @click="emit('cancel')">取消</button>
       </div>
       <div v-else-if="donePath" class="dl-done">

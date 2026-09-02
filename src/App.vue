@@ -12,6 +12,7 @@ import type {
   SoftItem,
   VsixCheck,
 } from "./types";
+import type { DownloadArgs } from "./api";
 import { containsVersion, joinPath, matchDownloaded, slugify } from "./utils";
 import SoftRow from "./components/SoftRow.vue";
 import ItemEditor from "./components/ItemEditor.vue";
@@ -111,7 +112,7 @@ onMounted(async () => {
   // 启动时静默检查自身更新（可在设置中关闭）
   if (config.value.settings.autoCheckSelf && api.isTauri) void checkSelf(true);
   await api.onProgress((p) => {
-    if (p.status === "progressing") {
+    if (p.status === "progressing" || p.status === "paused") {
       downloads.value[p.itemId] = p;
     } else if (p.status === "done") {
       delete downloads.value[p.itemId];
@@ -182,19 +183,22 @@ async function startSelfDownload(asset: Asset) {
     name = m ? `${m[1]}-${ver}${m[2]}` : `${name}-${ver}`;
   }
   selfDownloading.value = true;
-  try {
-    await api.download({
-      itemId: SELF_DL_ID,
-      url: asset.url,
-      fileName: name,
-      destDir: config.value.settings.downloadDir,
-      proxyPrefix: config.value.settings.downloadProxy,
-    });
-  } catch (e) {
-    if (!String(e).includes("取消")) toast(`Aurora 安装包下载失败：${e}`, "err");
-  } finally {
-    selfDownloading.value = false;
-  }
+  await queueDownload({
+    itemId: SELF_DL_ID,
+    url: asset.url,
+    fileName: name,
+    destDir: config.value.settings.downloadDir,
+    proxyPrefix: config.value.settings.downloadProxy,
+  });
+  selfDownloading.value = false;
+}
+
+function pauseDownload(itemId: string) {
+  void api.pause(itemId);
+}
+
+function resumeSelf() {
+  resumeDownload(SELF_DL_ID);
 }
 
 function notify(text: string, kind: "ok" | "err" | "info") {
@@ -355,20 +359,63 @@ async function startDownload(item: SoftItem, asset?: Asset) {
     settingsOpen.value = true;
     return;
   }
-  downloadingIds.add(item.id);
+  await queueDownload({
+    itemId: item.id,
+    url: a.url,
+    fileName: pickFileName(item, a),
+    destDir: config.value.settings.downloadDir,
+    proxyPrefix: config.value.settings.downloadProxy,
+  });
+}
+
+/** 下载参数缓存：暂停/失败后「继续/重试」用同一组参数断点续传 */
+const dlArgs = new Map<string, DownloadArgs>();
+/** 正在网络传输中的下载（不含 暂停/失败 状态） */
+const dlInFlight = new Set<string>();
+
+async function queueDownload(args: DownloadArgs): Promise<void> {
+  // 同一条下载进行中时不重复发起（暂停/失败状态允许重新入队续传）
+  if (dlInFlight.has(args.itemId)) return;
+  dlInFlight.add(args.itemId);
+  dlArgs.set(args.itemId, args);
+  downloadingIds.add(args.itemId);
   try {
-    await api.download({
-      itemId: item.id,
-      url: a.url,
-      fileName: pickFileName(item, a),
-      destDir: config.value.settings.downloadDir,
-      proxyPrefix: config.value.settings.downloadProxy,
-    });
+    await api.download(args);
+    // 正常返回即完成，done 事件已清理状态
+    downloadingIds.delete(args.itemId);
   } catch (e) {
-    if (!String(e).includes("取消")) toast(`${item.name} 下载失败：${e}`, "err");
+    const msg = String(e);
+    if (msg.includes("取消")) {
+      downloadingIds.delete(args.itemId);
+      delete downloads.value[args.itemId];
+    } else if (msg.includes("暂停")) {
+      // 进度事件已置为 paused，保留状态供「继续」
+    } else {
+      markDownloadError(args, msg);
+      toast(`下载失败：${msg}`, "err");
+    }
   } finally {
-    downloadingIds.delete(item.id);
+    dlInFlight.delete(args.itemId);
   }
+}
+
+function markDownloadError(args: DownloadArgs, msg: string) {
+  const prev = downloads.value[args.itemId];
+  downloads.value[args.itemId] = {
+    itemId: args.itemId,
+    fileName: prev?.fileName || args.fileName,
+    received: prev?.received ?? 0,
+    total: prev?.total ?? 0,
+    status: "error",
+    path: "",
+    error: msg,
+  };
+}
+
+/** 继续/重试：用原参数重新发起，后端从 .part 断点续传 */
+function resumeDownload(itemId: string) {
+  const args = dlArgs.get(itemId);
+  if (args) void queueDownload(args);
 }
 
 function markInstalled(item: SoftItem) {
@@ -557,6 +604,8 @@ function openLocal(path: string, reveal = false) {
           "
           @open-path="(p, r) => openLocal(p, r)"
           @open-url="openUrl"
+          @pause="pauseDownload(it.id)"
+          @resume="resumeDownload(it.id)"
         />
       </template>
     </main>
@@ -652,6 +701,9 @@ function openLocal(path: string, reveal = false) {
       @check="checkSelf()"
       @download="startSelfDownload"
       @open-url="openUrl"
+      @pause="pauseDownload(SELF_DL_ID)"
+      @resume="resumeSelf"
+      @cancel="api.cancel(SELF_DL_ID)"
       @close="selfDialogOpen = false"
     />
 

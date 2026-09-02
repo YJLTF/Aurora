@@ -105,6 +105,12 @@ export const api = {
     return call("cancel_download", { itemId });
   },
 
+  /** 暂停下载：保留 .part 分片，重新 download 即断点续传 */
+  pause(itemId: string): Promise<void> {
+    if (!isTauri) return Promise.resolve();
+    return call("pause_download", { itemId });
+  },
+
   open(path: string, reveal = false): Promise<void> {
     if (!isTauri) {
       console.info("[mock] open", path, reveal);

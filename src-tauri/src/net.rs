@@ -18,7 +18,12 @@ use tokio::io::AsyncWriteExt;
 #[derive(Default)]
 pub struct AppState {
     pub cancels: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// 下载暂停标记
+    pub pauses: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
+
+/// 瞬时错误自动重试次数（不含首次）
+const MAX_AUTO_RETRIES: u32 = 2;
 
 fn base_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
@@ -358,11 +363,17 @@ pub async fn download_file(
     let tmp_path = final_path.with_extension("part");
 
     let cancel = Arc::new(AtomicBool::new(false));
+    let pause = Arc::new(AtomicBool::new(false));
     state
         .cancels
         .lock()
         .unwrap()
         .insert(item_id.clone(), cancel.clone());
+    state
+        .pauses
+        .lock()
+        .unwrap()
+        .insert(item_id.clone(), pause.clone());
 
     let display_name = final_path
         .file_name()
@@ -373,12 +384,39 @@ pub async fn download_file(
     } else {
         http_client()
     };
-    let result = pump(
-        &app, &client, &real_url, &tmp_path, &final_path, &item_id, &display_name, &cancel,
-    )
-    .await;
+
+    // 自动重试：网络中断等瞬时错误从 .part 断点续传，暂停/取消立即返回
+    let mut attempt = 0u32;
+    let result = loop {
+        match pump(
+            &app, &client, &real_url, &tmp_path, &final_path, &item_id, &display_name, &cancel,
+            &pause,
+        )
+        .await
+        {
+            Ok(p) => break Ok(p),
+            Err(e) if e == "下载已取消" || e == "下载已暂停" => break Err(e),
+            Err(e) => {
+                if attempt >= MAX_AUTO_RETRIES {
+                    break Err(e);
+                }
+                attempt += 1;
+                // 退避等待，期间设置的取消/暂停会在下一轮 pump 顶部生效
+                let backoff = u64::from(attempt) * 800;
+                let mut waited = 0u64;
+                while waited < backoff
+                    && !cancel.load(AtomicOrdering::Relaxed)
+                    && !pause.load(AtomicOrdering::Relaxed)
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    waited += 100;
+                }
+            }
+        }
+    };
 
     state.cancels.lock().unwrap().remove(&item_id);
+    state.pauses.lock().unwrap().remove(&item_id);
     result
 }
 
@@ -391,21 +429,43 @@ async fn pump(
     item_id: &str,
     name: &str,
     cancel: &AtomicBool,
+    pause: &AtomicBool,
 ) -> Result<String, String> {
-    let resp = match client.get(url).send().await {
-        Ok(r) => r,
-        Err(e) => return Err(format!("连接下载地址失败: {e}")),
+    // 已有分片则从断点续传；分片越界（416，资源可能已更新）时删除分片从头下
+    let mut part_size = part_file_size(tmp);
+    let resp = loop {
+        let mut req = client.get(url);
+        if part_size > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={part_size}-"));
+        }
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => return Err(format!("连接下载地址失败: {e}")),
+        };
+        let status = resp.status();
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && part_size > 0 {
+            let _ = tokio::fs::remove_file(tmp).await;
+            part_size = 0;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("下载地址返回 {status}"));
+        }
+        break resp;
     };
-    if !resp.status().is_success() {
-        return Err(format!("下载地址返回 {}", resp.status()));
-    }
-    let total = resp.content_length().unwrap_or(0);
+
+    // 服务器不支持 Range 时会返回 200 全量，此时覆盖重写
+    let resume = part_size > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    let base = if resume { part_size } else { 0 };
+    let total = resp.content_length().map(|l| l + base).unwrap_or(0);
     let mut stream = resp.bytes_stream();
-    let mut file = match tokio::fs::File::create(tmp).await {
-        Ok(f) => f,
-        Err(e) => return Err(format!("创建文件失败: {e}")),
-    };
-    let mut received: u64 = 0;
+    let mut file = if resume {
+        tokio::fs::OpenOptions::new().append(true).open(tmp).await
+    } else {
+        tokio::fs::File::create(tmp).await
+    }
+    .map_err(|e| format!("创建文件失败: {e}"))?;
+    let mut received: u64 = base;
     let mut last_emit = Instant::now() - Duration::from_millis(500);
 
     loop {
@@ -415,18 +475,24 @@ async fn pump(
             send_progress(app, item_id, name, received, total, "cancelled", "", "已取消");
             return Err("下载已取消".into());
         }
+        // 暂停保留 .part 分片，供「继续」断点续传
+        if pause.load(AtomicOrdering::Relaxed) {
+            drop(file);
+            let part = tmp.to_string_lossy().to_string();
+            send_progress(app, item_id, name, received, total, "paused", &part, "已暂停");
+            return Err("下载已暂停".into());
+        }
         let chunk = match stream.next().await {
             Some(Ok(b)) => b,
             Some(Err(e)) => {
                 drop(file);
-                let _ = tokio::fs::remove_file(tmp).await;
+                // 保留分片供自动重试/手动重试续传
                 return Err(format!("下载中断: {e}"));
             }
             None => break,
         };
         if let Err(e) = file.write_all(&chunk).await {
             drop(file);
-            let _ = tokio::fs::remove_file(tmp).await;
             return Err(format!("写入文件失败: {e}"));
         }
         received += chunk.len() as u64;
@@ -447,6 +513,18 @@ async fn pump(
     let final_str = final_path.to_string_lossy().to_string();
     send_progress(app, item_id, name, received, total, "done", &final_str, "");
     Ok(final_str)
+}
+
+fn part_file_size(p: &std::path::Path) -> u64 {
+    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
+/// 暂停指定下载：保留 .part 分片，可再次调用 download_file 断点续传
+#[tauri::command]
+pub fn pause_download(state: State<'_, AppState>, item_id: String) {
+    if let Some(flag) = state.pauses.lock().unwrap().get(&item_id) {
+        flag.store(true, AtomicOrdering::Relaxed);
+    }
 }
 
 #[tauri::command]

@@ -15,6 +15,9 @@ const emit = defineEmits<{
   (e: "check"): void;
   (e: "download", asset: Asset): void;
   (e: "openUrl", url: string): void;
+  (e: "pause"): void;
+  (e: "resume"): void;
+  (e: "cancel"): void;
 }>();
 
 const selected = ref(props.info.assets[props.info.suggested]?.url ?? props.info.assets[0]?.url ?? "");
@@ -101,15 +104,34 @@ function picked(): Asset | null {
           </div>
         </div>
 
-        <div v-if="downloading && dl" class="dl" role="status">
-          <div class="bar" :class="{ indet: !dl.total }">
+        <div v-if="dl && dl.status !== 'done'" class="dl" role="status">
+          <div class="bar" :class="{ indet: !dl.total || dl.status === 'error' }">
             <div class="fill" :style="{ width: pct + '%' }"></div>
           </div>
           <span class="dl-text">{{
-            dl.total
-              ? `${dl.fileName} · ${pct}% · ${(dl.received / 1048576).toFixed(1)}/${(dl.total / 1048576).toFixed(1)} MB`
-              : `${dl.fileName} · ${(dl.received / 1048576).toFixed(1)} MB`
+            dl.status === "paused"
+              ? `${dl.fileName} · 已暂停 · ${pct}%`
+              : dl.status === "error"
+                ? `${dl.fileName} · ${dl.error}`
+                : dl.total
+                  ? `${dl.fileName} · ${pct}% · ${(dl.received / 1048576).toFixed(1)}/${(dl.total / 1048576).toFixed(1)} MB`
+                  : `${dl.fileName} · ${(dl.received / 1048576).toFixed(1)} MB`
           }}</span>
+          <button
+            v-if="dl.status === 'progressing'"
+            class="mini"
+            @click="emit('pause')"
+          >
+            暂停
+          </button>
+          <button
+            v-else-if="dl.status === 'paused' || dl.status === 'error'"
+            class="mini"
+            @click="emit('resume')"
+          >
+            {{ dl.status === "paused" ? "继续" : "重试" }}
+          </button>
+          <button class="mini danger" @click="emit('cancel')">取消</button>
         </div>
       </div>
 
