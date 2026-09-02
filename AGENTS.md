@@ -17,10 +17,12 @@ cd src-tauri && cargo check && cargo test   # Rust 检查与单元测试（7 个
 ## 架构地图
 
 ```
-src/App.vue            唯一容器：顶栏（视图切换/设置/扫描/检查全部）、雷达列表、状态栏、各弹窗
+src/App.vue            壳层：顶栏（视图切换/设置/扫描/检查全部）、状态栏、设置与自更新弹窗
+src/components/
+  RadarPanel.vue       软件雷达视图：清单/筛选/单项与全部检查/下载/已下载识别/编辑与选包弹窗
+  VscodePanel.vue      VSCode 插件视图：扫描/检查/下载
+  SoftRow.vue 等       行组件与各弹窗；DlProgress（进度行）、AssetRadioList（安装包单选）为复用基础组件
 src/download.ts        共享下载队列单例 dlStore：进度表(reactive)、传输中 Set、续传参数缓存、queue/resume/pause/cancel/drop
-src/components/        SoftRow 雷达行 / VscodePanel / ItemEditor / SettingsPanel / AssetPicker / SelfUpdateDialog
-                       DlProgress（进度行）与 AssetRadioList（安装包单选）为被复用的基础组件
 src/api.ts             全部 Tauri invoke 封装；isTauri 为 false 时走 src/mock.ts（浏览器预览）
 src/types.ts           前端类型 + compareVersion（与 Rust version.rs 语义一致，两份实现需同步改动）
 src-tauri/src/lib.rs   命令注册（generate_handler!）、配置读写（原子 tmp+rename）、open_path/open_url
@@ -28,6 +30,8 @@ src-tauri/src/model.rs 数据模型（serde camelCase）、score_asset Windows �
 src-tauri/src/net.rs   GitHub/HTML 检测、自更新、download_file（Range 断点续传/暂停/取消/自动重试）、list_downloads
 src-tauri/src/vscode.rs .vsix 文件名解析、递归扫描、VS Marketplace extensionquery 批量检查
 ```
+
+**视图面板模式**：两个面板均 `v-show` 常驻 + `defineExpose` 供顶栏直调（RadarPanel: `openAdd/checkAll/handleDone/busy`；VscodePanel: `scan/check/busy`），数据经 props 传入、事件冒泡（`notify`→toast、`persist`→防抖保存、`stats`→状态栏计数）。清单数组由 RadarPanel 原地增删改（push/splice/索引赋值），配置持久化始终由 App 收口。
 
 配置文件：`%APPDATA%/com.aurora.updater/aurora.json`（settings + items + vscodeChecks），前端 250ms 防抖后 `save_data`。
 

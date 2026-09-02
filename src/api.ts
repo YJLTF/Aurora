@@ -54,9 +54,9 @@ export const api = {
     return isTauri ? call("save_data", { config }) : Promise.resolve();
   },
 
-  check(item: SoftItem, config: Config): Promise<CheckOutcome> {
+  check(item: SoftItem, settings: Settings): Promise<CheckOutcome> {
     if (!isTauri) return mockCheck(item);
-    return call<CheckOutcome>("check_item", { item, settings: config.settings });
+    return call<CheckOutcome>("check_item", { item, settings });
   },
 
   /** 当前应用版本与自更新仓库 */

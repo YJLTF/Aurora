@@ -252,6 +252,14 @@ button {
 
 /* ---------- 列表 ---------- */
 
+/* 雷达面板容器：筛选条 + 列表，随视图 v-show 切换 */
+.radar-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .list {
   flex: 1;
   overflow-y: auto;

@@ -62,10 +62,13 @@ npm run dev        # 打开 http://localhost:5173
 ## 项目结构
 
 ```
-src/                  Vue 3 前端（列表/编辑/设置/安装包选择/自更新/VSCode 插件组件）
+src/                  Vue 3 前端
+src/App.vue           壳层：顶栏 / 双视图面板 / 状态栏 / 设置与自更新弹窗
 src/api.ts            Tauri invoke 封装（浏览器预览时自动切换 mock）
 src/download.ts       共享下载队列：进度表、传输中集合、断点续传参数缓存，三处下载入口共用
 src/components/
+  RadarPanel.vue      软件雷达视图（清单/筛选/检查/下载/编辑与选包弹窗）
+  VscodePanel.vue     VSCode 插件视图（扫描/检查/下载）
   DlProgress.vue      下载进度行（进度条/状态文案/暂停/继续/重试/取消）
   AssetRadioList.vue  安装包单选列表（选择弹窗与自更新弹窗共用）
 src-tauri/src/
