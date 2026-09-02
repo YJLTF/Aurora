@@ -108,11 +108,13 @@ impl Default for SoftwareItem {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Config {
     pub settings: Settings,
     pub items: Vec<SoftwareItem>,
+    /// VSCode 插件最近一次检查结果（跨会话恢复，重新扫描时按新本地版本重算）
+    pub vscode_checks: Vec<VsixCheck>,
 }
 
 /// 单次检测结果
@@ -185,6 +187,9 @@ pub struct VsixCheck {
     /// 最新版 vsix 下载直链
     pub download_url: String,
     pub has_update: bool,
+    /// 检查时间（epoch 毫秒，由前端填写，用于跨会话恢复）
+    #[serde(default)]
+    pub checked_at: u64,
     pub error: String,
 }
 
@@ -250,6 +255,7 @@ pub fn seed_config() -> Config {
     };
     Config {
         settings: Settings::default(),
+        vscode_checks: vec![],
         items: vec![
             gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
             SoftwareItem {

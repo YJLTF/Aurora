@@ -160,6 +160,7 @@ pub async fn check_vscode_updates(
             latest_version: String::new(),
             download_url: String::new(),
             has_update: false,
+            checked_at: 0,
             error: String::new(),
         };
         match latest.get(&it.id.to_lowercase()) {

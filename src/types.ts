@@ -75,12 +75,16 @@ export interface VsixCheck {
   latestVersion: string;
   downloadUrl: string;
   hasUpdate: boolean;
+  /** 检查时间（epoch 毫秒），用于持久化恢复 */
+  checkedAt: number;
   error: string;
 }
 
 export interface Config {
   settings: Settings;
   items: SoftItem[];
+  /** VSCode 插件最近一次检查结果（跨会话恢复） */
+  vscodeChecks: VsixCheck[];
 }
 
 export interface CheckOutcome {

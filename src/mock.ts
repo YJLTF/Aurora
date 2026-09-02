@@ -50,6 +50,7 @@ export function mockConfig(): Config {
       vscodeDir: "C:\\Users\\demo\\Downloads\\vscode",
       autoCheckSelf: true,
     },
+    vscodeChecks: [],
     items: [
       gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
       {
@@ -219,6 +220,7 @@ const VSIX_LATEST: Record<string, string> = {
 
 export async function mockVscodeChecks(items: VsixRef[]): Promise<VsixCheck[]> {
   await wait(500 + Math.random() * 500);
+  const now = Date.now();
   return items.map((it) => {
     const latest = VSIX_LATEST[it.id.toLowerCase()] ?? "";
     return {
@@ -227,6 +229,7 @@ export async function mockVscodeChecks(items: VsixRef[]): Promise<VsixCheck[]> {
       latestVersion: latest,
       downloadUrl: latest ? `https://example.com/${it.id}-${latest}.vsix` : "",
       hasUpdate: latest ? compareVersion(latest, it.localVersion) > 0 : false,
+      checkedAt: now,
       error: latest ? "" : "模拟数据中无此插件",
     };
   });

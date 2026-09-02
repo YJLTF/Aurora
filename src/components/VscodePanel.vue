@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { api } from "../api";
+import { compareVersion } from "../types";
 import type { DownloadProgress, Settings, VsixCheck } from "../types";
-import { joinPath } from "../utils";
+import { joinPath, timeAgo } from "../utils";
 
-const props = defineProps<{ settings: Settings }>();
+const props = defineProps<{
+  settings: Settings;
+  /** 上次会话持久化的检查结果，首次扫描后恢复 */
+  initialChecks: VsixCheck[];
+}>();
 
 const emit = defineEmits<{
   (e: "openSettings"): void;
   (e: "openPath", path: string, reveal?: boolean): void;
   (e: "notify", text: string, kind: "ok" | "err" | "info"): void;
   (e: "stats", total: number, updates: number): void;
+  (e: "saveChecks", checks: VsixCheck[]): void;
 }>();
 
 interface VsRow {
@@ -39,9 +45,14 @@ void api.onProgress((p) => {
   else delete downloads.value[p.itemId];
 });
 
-onMounted(() => {
-  void scan();
-});
+// 面板随视图常驻（v-show），配置异步就绪或目录变更时（重新）扫描
+watch(
+  () => props.settings.vscodeDir,
+  (d) => {
+    if (d.trim()) void scan();
+  },
+  { immediate: true },
+);
 
 /** 扫描备份目录并读取本机已安装版本；同名插件保留最高版本 */
 async function scan() {
@@ -56,8 +67,12 @@ async function scan() {
       if (!map.has(key)) map.set(key, { ...f });
     }
     rows.value = [...map.values()];
-    checks.value = {};
     scanned.value = true;
+    // 检查结果跨扫描保留：首次扫描恢复上次会话的结果，之后按新本地版本重算
+    if (!Object.keys(checks.value).length && props.initialChecks.length) {
+      applyChecks(props.initialChecks);
+    }
+    recomputeHasUpdate();
     try {
       installed.value = await api.readInstalledExtensions();
     } catch {
@@ -68,6 +83,22 @@ async function scan() {
     scanError.value = String(e);
   } finally {
     busy.scanning = false;
+  }
+}
+
+function applyChecks(list: VsixCheck[]) {
+  const m: Record<string, VsixCheck> = {};
+  for (const c of list) m[c.id.toLowerCase()] = { ...c };
+  checks.value = m;
+}
+
+/** 本地版本可能因重新扫描而变化，可更新标记按最新数据重算 */
+function recomputeHasUpdate() {
+  for (const r of rows.value) {
+    const c = checks.value[r.id.toLowerCase()];
+    if (c && c.latestVersion && r.version) {
+      c.hasUpdate = compareVersion(c.latestVersion, r.version) > 0;
+    }
   }
 }
 
@@ -82,9 +113,11 @@ async function check() {
       localVersion: r.version,
     }));
     const list = await api.checkVscodeUpdates(items, props.settings);
-    const m: Record<string, VsixCheck> = {};
-    for (const c of list) m[c.id.toLowerCase()] = c;
-    checks.value = m;
+    const now = Date.now();
+    for (const c of list) c.checkedAt = now;
+    applyChecks(list);
+    // 交回父级写入配置持久化
+    emit("saveChecks", list);
     emitStats();
     const upd = updateCount.value;
     if (list.some((c) => c.error)) {
@@ -126,6 +159,10 @@ const updateCount = computed(
 
 function latestOf(r: VsRow): string {
   return checks.value[r.id.toLowerCase()]?.latestVersion || "—";
+}
+
+function checkedAtOf(r: VsRow): number {
+  return checks.value[r.id.toLowerCase()]?.checkedAt ?? 0;
 }
 
 function downloadOf(r: VsRow): DownloadProgress | null {
@@ -199,6 +236,7 @@ function pctOf(p: DownloadProgress): number {
           <div
             class="ver"
             :class="{ hot: statusOf(r) === 'update', ok: statusOf(r) === 'uptodate' }"
+            :title="checkedAtOf(r) ? `${timeAgo(checkedAtOf(r))}检查` : ''"
           >
             {{ latestOf(r) }}
           </div>

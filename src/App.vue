@@ -10,6 +10,7 @@ import type {
   SelfUpdateInfo,
   Settings,
   SoftItem,
+  VsixCheck,
 } from "./types";
 import { containsVersion, joinPath, matchDownloaded, slugify } from "./utils";
 import SoftRow from "./components/SoftRow.vue";
@@ -28,6 +29,7 @@ const config = ref<Config>({
     vscodeDir: "",
     autoCheckSelf: true,
   },
+  vscodeChecks: [],
   items: [],
 });
 const ready = ref(false);
@@ -197,6 +199,12 @@ async function startSelfDownload(asset: Asset) {
 
 function notify(text: string, kind: "ok" | "err" | "info") {
   toast(text, kind);
+}
+
+/** VSCode 插件检查结果写入配置，跨会话/切视图恢复 */
+function saveVscodeChecks(list: VsixCheck[]) {
+  config.value.vscodeChecks = list;
+  persist();
 }
 
 const counts = computed<Record<string, number>>(() => {
@@ -514,7 +522,7 @@ function openLocal(path: string, reveal = false) {
     </nav>
 
     <main
-      v-if="view === 'radar'"
+      v-show="view === 'radar'"
       class="list"
       :class="{ 'is-empty': !visibleItems.length }"
     >
@@ -554,13 +562,15 @@ function openLocal(path: string, reveal = false) {
     </main>
 
     <VscodePanel
-      v-else
+      v-show="view === 'vscode'"
       ref="vsPanel"
       :settings="config.settings"
+      :initial-checks="config.vscodeChecks"
       @open-settings="settingsOpen = true"
       @open-path="openLocal"
       @notify="notify"
       @stats="(t, u) => (vsStats = { total: t, updates: u })"
+      @save-checks="saveVscodeChecks"
     />
 
     <footer class="statusbar">
