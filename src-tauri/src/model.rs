@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 /// Aurora 自身发布仓库（用于自更新检查）
 pub const SELF_REPO: &str = "YJLTF/Aurora";
 
+/// npm registry 官方源（未填写 npm_registry 设置时的兜底）
+pub const DEFAULT_NPM_REGISTRY: &str = "https://registry.npmjs.org";
+
 fn default_true() -> bool {
     true
 }
@@ -19,6 +22,12 @@ pub struct Settings {
     pub github_token: String,
     /// VSCode 离线 vsix 备份目录
     pub vscode_dir: String,
+    /// npm 全局目录（留空 = 自动执行 npm root -g 探测）
+    #[serde(default)]
+    pub npm_global_root: String,
+    /// npm registry 源（默认官方源，国内可切 npmmirror）
+    #[serde(default)]
+    pub npm_registry: String,
     /// 启动时自动检查 Aurora 自身更新
     #[serde(default = "default_true")]
     pub auto_check_self: bool,
@@ -32,6 +41,8 @@ impl Default for Settings {
             download_proxy: String::new(),
             github_token: String::new(),
             vscode_dir: String::new(),
+            npm_global_root: String::new(),
+            npm_registry: DEFAULT_NPM_REGISTRY.into(),
             auto_check_self: true,
         }
     }
@@ -109,6 +120,8 @@ pub struct Config {
     pub items: Vec<SoftwareItem>,
     /// VSCode 插件最近一次检查结果（跨会话恢复，重新扫描时按新本地版本重算）
     pub vscode_checks: Vec<VsixCheck>,
+    /// npm 全局包最近一次检查结果（跨会话恢复，重新扫描时按新本地版本重算）
+    pub npm_checks: Vec<NpmCheck>,
 }
 
 /// 单次检测结果
@@ -187,6 +200,39 @@ pub struct VsixCheck {
     pub error: String,
 }
 
+/// npm 全局目录中的一个包
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmInfo {
+    /// 包名（scoped 形如 @types/node）
+    pub name: String,
+    pub version: String,
+    /// 包目录绝对路径
+    pub dir: String,
+}
+
+/// 参与检查的 npm 包（包名 + 本地版本）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmRef {
+    pub name: String,
+    pub local_version: String,
+}
+
+/// 单个 npm 全局包的 registry 检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmCheck {
+    pub name: String,
+    pub local_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    /// 检查时间（epoch 毫秒，由前端填写，用于跨会话恢复）
+    #[serde(default)]
+    pub checked_at: u64,
+    pub error: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadProgress {
@@ -250,6 +296,7 @@ pub fn seed_config() -> Config {
     Config {
         settings: Settings::default(),
         vscode_checks: vec![],
+        npm_checks: vec![],
         items: vec![
             gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
             SoftwareItem {

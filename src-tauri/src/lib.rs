@@ -1,5 +1,6 @@
 mod model;
 mod net;
+mod npm;
 mod version;
 mod vscode;
 
@@ -159,6 +160,9 @@ pub fn run() {
             vscode::list_vsix,
             vscode::read_installed_extensions,
             vscode::check_vscode_updates,
+            npm::npm_detect_root,
+            npm::scan_npm,
+            npm::check_npm_updates,
             open_path,
             open_url
         ])
