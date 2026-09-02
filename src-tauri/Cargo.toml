@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.2.0"
+version = "0.3.0"
 description = "Aurora - 常用软件更新检查与升级包下载工具"
 edition = "2021"
 

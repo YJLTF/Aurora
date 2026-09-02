@@ -12,13 +12,14 @@
 - **一键检查全部**：并发检测，可更新的软件自动置顶，版本跃迁 `本地 → 最新` 一目了然
 - **Aurora 自更新检查**：顶栏切换旁的视图之外，左下角状态栏常显 `Aurora v当前版本`，点击即可检查自身更新（GitHub Releases，仓库 `YJLTF/Aurora`）；发现新版本时版本号旁出现琥珀色圆点，弹窗内展示更新说明与安装包列表，可直接下载到下载目录后手动运行升级（默认启动时静默检查一次，可在设置中关闭）
 - **VSCode 插件更新检查**：顶栏切换到"VSCode 插件"视图，递归扫描备份目录（默认 `下载目录\vscode`，可设置）及其子文件夹中的 `.vsix` 文件，从文件名解析 `插件ID + 版本 + 平台后缀`；一键批量查询 VS Marketplace 最新版本，对比"备份版本 / 本机已装版本 / 最新版本"，可更新项一键下载新版 vsix 到原文件所在子文件夹（沿用原命名规则）；已装版本读取自 `~/.vscode/extensions/extensions.json`；检查结果持久化保存，重启后直接恢复（重新扫描时按最新本地版本重算可更新标记）
+- **NPM 全局包更新检查**：顶栏切换到"NPM 全局包"视图，自动执行 `npm root -g` 定位全局 node_modules（探测失败可在设置手动指定），读取各包 `package.json` 得到本地版本（含 `@scope` 包，别名包也不歧义）；批量查询 registry 的 dist-tags 最新版（限并发、IPv4 优先），可更新项一键复制 `npm install -g <包>@latest` 升级命令或打开 npm 包页面；检查结果跨会话持久化，重扫描按新本地版本重算
 - **升级包下载**：自动按 Windows 相关性推荐安装包（x64/setup/exe 优先，排除 arm64/macOS/校验文件），也可手动挑选；实时进度，支持 **暂停 / 继续（断点续传）/ 失败自动重试（2 次，指数退避）/ 取消**，下载完成可直接打开文件所在目录
   - 断点续传基于 HTTP Range：未完成的分片保存为 `<下载目录>/<文件名>.part`，暂停或失败时保留供续传，取消时删除，完成后自动改名为最终文件（GitHub 与 VS Marketplace CDN 均支持 Range；服务器不支持时自动从头下载）
 - **已下载安装包识别**：检查时扫描下载目录，若最新版本的安装包已经下载过，行内显示"✓ 最新版本安装包已下载"并可一键在资源管理器中定位，避免重复下载
   - 文件名含版本号的按版本匹配；下载时若安装包文件名不含版本号会自动追加到扩展名前（如 `Hoppscotch_win_x64.exe` → `Hoppscotch_win_x64-25.7.0.exe`），确保日后能识别
   - 兼容历史无版本文件：按"去掉版本后的文件名骨架"匹配
 - **本地版本登记**：未登记时显示"待登记"；登记后自动判定 可更新 / 已最新；行内即可编辑，或一键"设为已装"
-- **针对国内网络的设置**：GitHub API 镜像地址、下载加速前缀（仅作用于 github.com 直链）、可选 Token（避免 60 次/小时限流）
+- **针对国内网络的设置**：GitHub API 镜像地址、下载加速前缀（仅作用于 github.com 直链）、可选 Token（避免 60 次/小时限流）、npm Registry 镜像（可切 npmmirror，检测走 IPv4 优先）
 
 ## 运行
 
@@ -38,7 +39,7 @@ npm run dev        # 打开 http://localhost:5173
 
 ## 配置存储
 
-配置保存在 `%APPDATA%/com.aurora.updater/aurora.json`（软件清单 + 设置 + 最近检测结果），删除该文件可恢复预置清单。设置项：下载目录、VSCode 备份目录、GitHub API 镜像、下载加速前缀、GitHub Token、启动时自动检查 Aurora 更新。
+配置保存在 `%APPDATA%/com.aurora.updater/aurora.json`（软件清单 + 设置 + 最近检测结果），删除该文件可恢复预置清单。设置项：下载目录、VSCode 备份目录、npm 全局目录、npm Registry、GitHub API 镜像、下载加速前缀、GitHub Token、启动时自动检查 Aurora 更新。
 
 ## 预置清单（来自收藏夹）
 
@@ -63,12 +64,13 @@ npm run dev        # 打开 http://localhost:5173
 
 ```
 src/                  Vue 3 前端
-src/App.vue           壳层：顶栏 / 双视图面板 / 状态栏 / 设置与自更新弹窗
+src/App.vue           壳层：顶栏 / 三视图面板 / 状态栏 / 设置与自更新弹窗
 src/api.ts            Tauri invoke 封装（浏览器预览时自动切换 mock）
 src/download.ts       共享下载队列：进度表、传输中集合、断点续传参数缓存，三处下载入口共用
 src/components/
   RadarPanel.vue      软件雷达视图（清单/筛选/检查/下载/编辑与选包弹窗）
   VscodePanel.vue     VSCode 插件视图（扫描/检查/下载）
+  NpmPanel.vue        NPM 全局包视图（探测与扫描/检查/复制升级命令/打开主页）
   DlProgress.vue      下载进度行（进度条/状态文案/暂停/继续/重试/取消）
   AssetRadioList.vue  安装包单选列表（选择弹窗与自更新弹窗共用）
 src-tauri/src/
@@ -76,11 +78,18 @@ src-tauri/src/
   model.rs            数据模型、Windows 附件评分、预置清单
   net.rs              GitHub/HTML 检测、Aurora 自更新、流式下载（进度事件、暂停/取消/断点续传）、下载目录扫描
   vscode.rs           .vsix 文件名解析与目录扫描、VS Marketplace 批量更新检查
+  npm.rs              npm root -g 探测（Windows 经 cmd /C）、全局包扫描、registry dist-tags 批量检查（限并发）
   version.rs          宽松版本比较（兼容日期版本号、预发布后缀）
 scripts/gen_icons.py  图标生成脚本（PNG/ICO）
 ```
 
 ## 更新日志
+
+### v0.3.0
+
+- **NPM 全局包更新检查**：自动执行 `npm root -g` 定位全局目录（可在设置手动指定兜底），扫描各包 `package.json` 得到本地版本（支持 `@scope` 包）；批量查询 registry 的 dist-tags 最新版（限 6 路并发、IPv4 优先），标记"可更新 / 已最新"，行内一键复制 `npm install -g <包>@latest` 升级命令、打开 npm 包页面；检查结果跨会话持久化，重扫描按新本地版本重算
+- **npm 设置项**：npm 全局目录（GUI 环境探测失败时的手动兜底）、npm Registry 源（默认官方，国内可切 `registry.npmmirror.com`）
+- **界面**：顶栏扩为 软件雷达 / VSCode 插件 / NPM 全局包 三视图，状态栏按视图计数；设置面板新增两个 npm 字段
 
 ### v0.2.0
 
