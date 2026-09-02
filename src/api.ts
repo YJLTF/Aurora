@@ -3,6 +3,9 @@ import type {
   CheckOutcome,
   Config,
   DownloadProgress,
+  NpmCheck,
+  NpmInfo,
+  NpmRef,
   SelfUpdateInfo,
   SoftItem,
   Settings,
@@ -20,6 +23,9 @@ import {
   mockListVsix,
   mockInstalledExtensions,
   mockVscodeChecks,
+  mockNpmRoot,
+  mockScanNpm,
+  mockNpmChecks,
 } from "./mock";
 
 const isTauri =
@@ -87,6 +93,24 @@ export const api = {
   checkVscodeUpdates(items: VsixRef[]): Promise<VsixCheck[]> {
     if (!isTauri) return Promise.resolve(mockVscodeChecks(items));
     return call<VsixCheck[]>("check_vscode_updates", { items });
+  },
+
+  /** 解析 npm 全局目录：手动指定优先，否则执行 npm root -g */
+  npmDetectRoot(manual: string): Promise<string> {
+    if (!isTauri) return Promise.resolve(mockNpmRoot());
+    return call<string>("npm_detect_root", { manual });
+  },
+
+  /** 扫描 npm 全局目录中的包（含 @scope，本地版本读各包 package.json） */
+  scanNpm(root: string): Promise<NpmInfo[]> {
+    if (!isTauri) return Promise.resolve(mockScanNpm());
+    return call<NpmInfo[]>("scan_npm", { root });
+  },
+
+  /** 批量检查 npm 全局包的 registry 更新 */
+  checkNpmUpdates(items: NpmRef[], settings: Settings): Promise<NpmCheck[]> {
+    if (!isTauri) return Promise.resolve(mockNpmChecks(items));
+    return call<NpmCheck[]>("check_npm_updates", { items, settings });
   },
 
   download(args: DownloadArgs): Promise<string> {

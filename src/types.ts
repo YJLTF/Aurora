@@ -34,6 +34,10 @@ export interface Settings {
   githubToken: string;
   /** VSCode 离线 vsix 备份目录 */
   vscodeDir: string;
+  /** npm 全局目录，留空 = 自动执行 npm root -g 探测 */
+  npmGlobalRoot: string;
+  /** npm registry 源（默认官方源，可切 npmmirror） */
+  npmRegistry: string;
   /** 启动时自动检查 Aurora 自身更新 */
   autoCheckSelf: boolean;
 }
@@ -80,11 +84,39 @@ export interface VsixCheck {
   error: string;
 }
 
+/** npm 全局目录中的一个包 */
+export interface NpmInfo {
+  /** 包名（scoped 形如 @types/node） */
+  name: string;
+  version: string;
+  /** 包目录绝对路径 */
+  dir: string;
+}
+
+/** 参与检查的 npm 包 */
+export interface NpmRef {
+  name: string;
+  localVersion: string;
+}
+
+/** 单个 npm 全局包的 registry 检查结果 */
+export interface NpmCheck {
+  name: string;
+  localVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  /** 检查时间（epoch 毫秒），用于持久化恢复 */
+  checkedAt: number;
+  error: string;
+}
+
 export interface Config {
   settings: Settings;
   items: SoftItem[];
   /** VSCode 插件最近一次检查结果（跨会话恢复） */
   vscodeChecks: VsixCheck[];
+  /** npm 全局包最近一次检查结果（跨会话恢复） */
+  npmChecks: NpmCheck[];
 }
 
 export interface CheckOutcome {

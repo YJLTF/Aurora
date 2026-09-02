@@ -8,6 +8,9 @@ import type {
   CheckOutcome,
   Config,
   DownloadProgress,
+  NpmCheck,
+  NpmInfo,
+  NpmRef,
   SelfUpdateInfo,
   SoftItem,
   Settings,
@@ -48,9 +51,12 @@ export function mockConfig(): Config {
       downloadProxy: "",
       githubToken: "",
       vscodeDir: "C:\\Users\\demo\\Downloads\\vscode",
+      npmGlobalRoot: "",
+      npmRegistry: "https://registry.npmjs.org",
       autoCheckSelf: true,
     },
     vscodeChecks: [],
+    npmChecks: [],
     items: [
       gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
       {
@@ -231,6 +237,50 @@ export async function mockVscodeChecks(items: VsixRef[]): Promise<VsixCheck[]> {
       hasUpdate: latest ? compareVersion(latest, it.localVersion) > 0 : false,
       checkedAt: now,
       error: latest ? "" : "模拟数据中无此插件",
+    };
+  });
+}
+
+const MOCK_NPM_ROOT = "C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules";
+
+export function mockNpmRoot(): string {
+  return MOCK_NPM_ROOT;
+}
+
+const MOCK_NPM: NpmInfo[] = [
+  { name: "@anthropic-ai/claude-code", version: "1.0.0", dir: `${MOCK_NPM_ROOT}\\@anthropic-ai\\claude-code` },
+  { name: "@types/node", version: "22.5.0", dir: `${MOCK_NPM_ROOT}\\@types\\node` },
+  { name: "eslint", version: "9.9.0", dir: `${MOCK_NPM_ROOT}\\eslint` },
+  { name: "npm-check-updates", version: "17.0.3", dir: `${MOCK_NPM_ROOT}\\npm-check-updates` },
+  { name: "pnpm", version: "9.6.0", dir: `${MOCK_NPM_ROOT}\\pnpm` },
+  { name: "typescript", version: "5.5.4", dir: `${MOCK_NPM_ROOT}\\typescript` },
+];
+
+export function mockScanNpm(): NpmInfo[] {
+  return MOCK_NPM;
+}
+
+const NPM_LATEST: Record<string, string> = {
+  "@anthropic-ai/claude-code": "1.0.12",
+  "@types/node": "22.5.1",
+  eslint: "9.9.1",
+  "npm-check-updates": "17.1.0",
+  pnpm: "9.6.0",
+  typescript: "5.9.2",
+};
+
+export async function mockNpmChecks(items: NpmRef[]): Promise<NpmCheck[]> {
+  await wait(400 + Math.random() * 500);
+  const now = Date.now();
+  return items.map((it) => {
+    const latest = NPM_LATEST[it.name.toLowerCase()] ?? "";
+    return {
+      name: it.name,
+      localVersion: it.localVersion,
+      latestVersion: latest,
+      hasUpdate: latest ? compareVersion(latest, it.localVersion) > 0 : false,
+      checkedAt: now,
+      error: latest ? "" : "模拟数据中无此包",
     };
   });
 }

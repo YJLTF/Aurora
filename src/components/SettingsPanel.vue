@@ -27,6 +27,8 @@ function save() {
     downloadProxy: form.downloadProxy.trim(),
     githubToken: form.githubToken.trim(),
     vscodeDir: form.vscodeDir.trim(),
+    npmGlobalRoot: form.npmGlobalRoot.trim(),
+    npmRegistry: form.npmRegistry.trim() || "https://registry.npmjs.org",
     autoCheckSelf: form.autoCheckSelf,
   });
 }
@@ -57,6 +59,30 @@ function save() {
             <button class="btn ghost sm" @click="emit('openVscodeDir')">打开</button>
           </div>
           <span class="fhint">存放离线 .vsix 的目录（含子文件夹），留空则默认为下载目录下的 vscode</span>
+        </label>
+
+        <label class="field">
+          <span class="flabel">npm 全局目录</span>
+          <div class="inrow">
+            <input
+              v-model="form.npmGlobalRoot"
+              class="mono"
+              placeholder="留空自动执行 npm root -g"
+              spellcheck="false"
+            />
+          </div>
+          <span class="fhint">全局 node_modules 路径；npm 探测失败时在此手动指定</span>
+        </label>
+
+        <label class="field">
+          <span class="flabel">npm Registry</span>
+          <input
+            v-model="form.npmRegistry"
+            class="mono"
+            placeholder="https://registry.npmjs.org"
+            spellcheck="false"
+          />
+          <span class="fhint">检查全局包更新所用源，国内可切 https://registry.npmmirror.com</span>
         </label>
 
         <label class="field">

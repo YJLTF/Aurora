@@ -5,6 +5,7 @@ import { dlStore } from "./download";
 import type {
   Asset,
   Config,
+  NpmCheck,
   SelfUpdateInfo,
   Settings,
   VsixCheck,
@@ -12,6 +13,7 @@ import type {
 import { containsVersion, stemOf, withVersionSuffix } from "./utils";
 import RadarPanel from "./components/RadarPanel.vue";
 import VscodePanel from "./components/VscodePanel.vue";
+import NpmPanel from "./components/NpmPanel.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import SelfUpdateDialog from "./components/SelfUpdateDialog.vue";
 
@@ -22,22 +24,28 @@ const config = ref<Config>({
     downloadProxy: "",
     githubToken: "",
     vscodeDir: "",
+    npmGlobalRoot: "",
+    npmRegistry: "https://registry.npmjs.org",
     autoCheckSelf: true,
   },
   vscodeChecks: [],
+  npmChecks: [],
   items: [],
 });
 const ready = ref(false);
 const settingsOpen = ref(false);
 
-/** 主视图切换：软件雷达 / VSCode 插件 */
-const view = ref<"radar" | "vscode">("radar");
+/** 主视图切换：软件雷达 / VSCode 插件 / NPM 全局包 */
+const view = ref<"radar" | "vscode" | "npm">("radar");
 /** 软件雷达面板：顶栏按钮直调其 openAdd/checkAll，下载完成经 handleDone 转发 */
 const radarPanel = ref<InstanceType<typeof RadarPanel> | null>(null);
 const radarStats = ref({ total: 0, updates: 0 });
 /** VSCode 面板：顶栏按钮直调其 scan/check */
 const vsPanel = ref<InstanceType<typeof VscodePanel> | null>(null);
 const vsStats = ref({ total: 0, updates: 0 });
+/** NPM 面板：顶栏按钮直调其 scan/check */
+const npmPanel = ref<InstanceType<typeof NpmPanel> | null>(null);
+const npmStats = ref({ total: 0, updates: 0 });
 
 /** Aurora 自身更新 */
 const SELF_DL_ID = "aurora-self-update";
@@ -162,6 +170,12 @@ function saveVscodeChecks(list: VsixCheck[]) {
   persist();
 }
 
+/** npm 全局包检查结果写入配置，跨会话/切视图恢复 */
+function saveNpmChecks(list: NpmCheck[]) {
+  config.value.npmChecks = list;
+  persist();
+}
+
 function saveSettings(s: Settings) {
   config.value.settings = s;
   settingsOpen.value = false;
@@ -216,6 +230,9 @@ function openLocal(path: string, reveal = false) {
           <button :class="{ on: view === 'vscode' }" @click="view = 'vscode'">
             VSCode 插件
           </button>
+          <button :class="{ on: view === 'npm' }" @click="view = 'npm'">
+            NPM 全局包
+          </button>
         </div>
         <button class="btn ghost" @click="settingsOpen = true">设置</button>
         <button
@@ -226,12 +243,21 @@ function openLocal(path: string, reveal = false) {
           ＋ 添加软件
         </button>
         <button
-          v-else
+          v-else-if="view === 'vscode'"
           class="btn ghost"
           :disabled="vsPanel?.busy.scanning || !config.settings.vscodeDir.trim()"
           @click="vsPanel?.scan()"
         >
           <span v-if="vsPanel?.busy.scanning" class="spin" aria-hidden="true"></span>
+          扫描
+        </button>
+        <button
+          v-else
+          class="btn ghost"
+          :disabled="npmPanel?.busy.scanning"
+          @click="npmPanel?.scan()"
+        >
+          <span v-if="npmPanel?.busy.scanning" class="spin" aria-hidden="true"></span>
           扫描
         </button>
         <button
@@ -248,13 +274,22 @@ function openLocal(path: string, reveal = false) {
           }}
         </button>
         <button
-          v-else
+          v-else-if="view === 'vscode'"
           class="btn primary"
           :disabled="vsPanel?.busy.checking || vsPanel?.busy.scanning || !vsStats.total"
           @click="vsPanel?.check()"
         >
           <span v-if="vsPanel?.busy.checking" class="spin light" aria-hidden="true"></span>
           {{ vsPanel?.busy.checking ? "检查中…" : "检查全部" }}
+        </button>
+        <button
+          v-else
+          class="btn primary"
+          :disabled="npmPanel?.busy.checking || npmPanel?.busy.scanning || !npmStats.total"
+          @click="npmPanel?.check()"
+        >
+          <span v-if="npmPanel?.busy.checking" class="spin light" aria-hidden="true"></span>
+          {{ npmPanel?.busy.checking ? "检查中…" : "检查全部" }}
         </button>
       </div>
     </header>
@@ -285,6 +320,18 @@ function openLocal(path: string, reveal = false) {
       @save-checks="saveVscodeChecks"
     />
 
+    <NpmPanel
+      v-show="view === 'npm'"
+      ref="npmPanel"
+      :settings="config.settings"
+      :initial-checks="config.npmChecks"
+      @open-settings="settingsOpen = true"
+      @open-url="openUrl"
+      @notify="toast"
+      @stats="(t: number, u: number) => (npmStats = { total: t, updates: u })"
+      @save-checks="saveNpmChecks"
+    />
+
     <footer class="statusbar">
       <template v-if="view === 'radar'">
         <span>
@@ -292,10 +339,16 @@ function openLocal(path: string, reveal = false) {
           <b :class="{ amber: radarStats.updates > 0 }">{{ radarStats.updates }}</b> 项可更新
         </span>
       </template>
-      <template v-else>
+      <template v-else-if="view === 'vscode'">
         <span>
           {{ vsStats.total }} 个插件 ·
           <b :class="{ amber: vsStats.updates > 0 }">{{ vsStats.updates }}</b> 个可更新
+        </span>
+      </template>
+      <template v-else>
+        <span>
+          {{ npmStats.total }} 个全局包 ·
+          <b :class="{ amber: npmStats.updates > 0 }">{{ npmStats.updates }}</b> 个可更新
         </span>
       </template>
       <span class="grow"></span>

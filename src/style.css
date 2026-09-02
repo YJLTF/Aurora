@@ -1096,6 +1096,20 @@ button {
   font-size: 13.5px;
 }
 
+/* npm 全局包视图：与 VSCode 页同构，但行内少一列版本 */
+.npm-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 2px 26px 12px;
+}
+
+.npm-list .vrow {
+  grid-template-columns: minmax(200px, 1.6fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) 168px;
+}
+
 /* 顶栏视图切换 */
 .top-actions .view-seg {
   margin-right: 6px;
