@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import type { Asset, DownloadProgress, ItemStatus, SoftItem } from "../types";
 import { timeAgo } from "../utils";
+import DlProgress from "./DlProgress.vue";
 
 const props = defineProps<{
   item: SoftItem;
@@ -56,25 +57,6 @@ const sourceTitle = computed(() => {
 
 const latestLabel = computed(() => props.item.latestVersion || "—");
 const hasAssets = computed(() => props.item.assets.length > 0);
-
-const pct = computed(() => {
-  const d = props.dl;
-  if (!d) return 0;
-  if (!d.total) return 0;
-  return Math.min(100, Math.round((d.received / d.total) * 100));
-});
-
-/** 进度条旁的状态文案：区分 下载中/已暂停/失败 */
-const dlText = computed(() => {
-  const d = props.dl;
-  if (!d) return "";
-  const size = d.total
-    ? `${pct.value}% · ${(d.received / 1048576).toFixed(1)}/${(d.total / 1048576).toFixed(1)} MB`
-    : `${(d.received / 1048576).toFixed(1)} MB`;
-  if (d.status === "paused") return `${d.fileName} · 已暂停 · ${size}`;
-  if (d.status === "error") return `${d.fileName} · ${d.error}`;
-  return `${d.fileName} · ${size}`;
-});
 
 const doneName = computed(
   () => props.donePath.split(/[\\/]/).pop() ?? props.donePath,
@@ -136,27 +118,13 @@ function commit() {
         {{ item.lastError }}
       </div>
 
-      <div v-if="dl" class="dl" role="status">
-        <div class="bar" :class="{ indet: !dl.total }">
-          <div class="fill" :style="{ width: pct + '%' }"></div>
-        </div>
-        <span class="dl-text">{{ dlText }}</span>
-        <button
-          v-if="dl.status === 'progressing'"
-          class="mini"
-          @click="emit('pause')"
-        >
-          暂停
-        </button>
-        <button
-          v-else-if="dl.status === 'paused' || dl.status === 'error'"
-          class="mini"
-          @click="emit('resume')"
-        >
-          {{ dl.status === "paused" ? "继续" : "重试" }}
-        </button>
-        <button class="mini danger" @click="emit('cancel')">取消</button>
-      </div>
+      <DlProgress
+        v-if="dl"
+        :dl="dl"
+        @pause="emit('pause')"
+        @resume="emit('resume')"
+        @cancel="emit('cancel')"
+      />
       <div v-else-if="donePath" class="dl-done">
         <span class="ok-mark">✓</span>
         <span class="dl-text" :title="donePath">{{ doneName }}</span>

@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "./api";
+import { dlStore } from "./download";
 import { compareVersion } from "./types";
 import type {
   Asset,
   Config,
-  DownloadProgress,
   ItemStatus,
   SelfUpdateInfo,
   Settings,
   SoftItem,
   VsixCheck,
 } from "./types";
-import type { DownloadArgs } from "./api";
-import { containsVersion, joinPath, matchDownloaded, slugify } from "./utils";
+import {
+  containsVersion,
+  joinPath,
+  matchDownloaded,
+  slugify,
+  stemOf,
+  withVersionSuffix,
+} from "./utils";
 import SoftRow from "./components/SoftRow.vue";
 import ItemEditor from "./components/ItemEditor.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
@@ -35,8 +41,6 @@ const config = ref<Config>({
 });
 const ready = ref(false);
 const checkingIds = reactive(new Set<string>());
-const downloadingIds = reactive(new Set<string>());
-const downloads = ref<Record<string, DownloadProgress>>({});
 const donePaths = ref<Record<string, string>>({});
 const downloadedFiles = ref<string[]>([]);
 const checkAllRunning = ref(false);
@@ -59,7 +63,8 @@ const appVersion = ref("");
 const selfInfo = ref<SelfUpdateInfo | null>(null);
 const selfDialogOpen = ref(false);
 const selfChecking = ref(false);
-const selfDownloading = ref(false);
+/** 自更新安装包传输中（跟随共享下载队列） */
+const selfDownloading = computed(() => dlStore.active.has(SELF_DL_ID));
 
 interface Toast {
   id: number;
@@ -109,33 +114,22 @@ onMounted(async () => {
   } catch {
     appVersion.value = "";
   }
+  dlStore.setNotify(toast);
   // 启动时静默检查自身更新（可在设置中关闭）
   if (config.value.settings.autoCheckSelf && api.isTauri) void checkSelf(true);
+  // 全局唯一订阅下载进度：状态入共享队列，完成行为在这里收口
   await api.onProgress((p) => {
-    if (p.status === "progressing" || p.status === "paused") {
-      downloads.value[p.itemId] = p;
-    } else if (p.status === "done") {
-      delete downloads.value[p.itemId];
-      downloadingIds.delete(p.itemId);
+    dlStore.handle(p);
+    if (p.status === "done") {
       donePaths.value[p.itemId] = p.path;
-      if (p.itemId === SELF_DL_ID) {
-        selfDownloading.value = false;
-        toast(`${p.fileName} 下载完成，运行安装包即可完成升级`, "ok");
-        setTimeout(() => delete donePaths.value[p.itemId], 60_000);
-      } else {
-        toast(`${p.fileName} 下载完成`, "ok");
-        setTimeout(() => delete donePaths.value[p.itemId], 60_000);
-      }
+      toast(
+        p.itemId === SELF_DL_ID
+          ? `${p.fileName} 下载完成，运行安装包即可完成升级`
+          : `${p.fileName} 下载完成`,
+        "ok",
+      );
+      setTimeout(() => delete donePaths.value[p.itemId], 60_000);
       void refreshDownloaded();
-    } else if (p.status === "cancelled") {
-      delete downloads.value[p.itemId];
-      downloadingIds.delete(p.itemId);
-      if (p.itemId === SELF_DL_ID) selfDownloading.value = false;
-    } else if (p.status === "error") {
-      delete downloads.value[p.itemId];
-      downloadingIds.delete(p.itemId);
-      if (p.itemId === SELF_DL_ID) selfDownloading.value = false;
-      toast(`下载失败：${p.error}`, "err");
     }
   });
 });
@@ -148,11 +142,16 @@ async function checkSelf(silent = false) {
     const info = await api.checkSelfUpdate(config.value.settings);
     selfInfo.value = info;
     if (!info.error) {
-      if (info.hasUpdate && !silent) toast(`发现新版本 v${info.latestVersion}`, "ok");
-      if (info.hasUpdate && silent) {
-        toast(`Aurora 有新版本 v${info.latestVersion}，点击左下角版本号查看`, "ok");
+      if (info.hasUpdate) {
+        toast(
+          silent
+            ? `Aurora 有新版本 v${info.latestVersion}，点击左下角版本号查看`
+            : `发现新版本 v${info.latestVersion}`,
+          "ok",
+        );
+      } else if (!silent) {
+        toast(`Aurora 已是最新（v${info.currentVersion}）`);
       }
-      if (!info.hasUpdate && !silent) toast(`Aurora 已是最新（v${info.currentVersion}）`);
     } else if (!silent) {
       toast(`检查更新失败: ${info.error}`, "err");
     }
@@ -178,31 +177,14 @@ async function startSelfDownload(asset: Asset) {
   const ver = selfInfo.value?.latestVersion ?? "";
   let name = asset.name || `Aurora_${ver || "latest"}.exe`;
   // 文件名不含版本号时补上，便于与下载目录里的历史安装包区分
-  if (ver && !containsVersion(stemOnly(name), ver)) {
-    const m = name.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
-    name = m ? `${m[1]}-${ver}${m[2]}` : `${name}-${ver}`;
-  }
-  selfDownloading.value = true;
-  await queueDownload({
+  if (ver && !containsVersion(stemOf(name), ver)) name = withVersionSuffix(name, ver);
+  await dlStore.queue({
     itemId: SELF_DL_ID,
     url: asset.url,
     fileName: name,
     destDir: config.value.settings.downloadDir,
     proxyPrefix: config.value.settings.downloadProxy,
   });
-  selfDownloading.value = false;
-}
-
-function pauseDownload(itemId: string) {
-  void api.pause(itemId);
-}
-
-function resumeSelf() {
-  resumeDownload(SELF_DL_ID);
-}
-
-function notify(text: string, kind: "ok" | "err" | "info") {
-  toast(text, kind);
 }
 
 /** VSCode 插件检查结果写入配置，跨会话/切视图恢复 */
@@ -218,12 +200,11 @@ const counts = computed<Record<string, number>>(() => {
     uptodate: 0,
     untracked: 0,
     error: 0,
-    idle: 0,
   };
   for (const it of config.value.items) {
     c.all++;
     const s = statusOf(it);
-    if (s !== "checking") c[s]++;
+    if (s !== "checking" && s in c) c[s]++;
   }
   return c;
 });
@@ -308,20 +289,14 @@ async function checkAll() {
 
 function pickFileName(item: SoftItem, a: Asset): string {
   const ver = item.latestVersion.trim();
-  let name = a.name.trim();
+  const name = a.name.trim();
   if (!/\.[A-Za-z0-9]{1,6}$/.test(name)) {
     return `${item.id || slugify(item.name) || "setup"}-${ver || "latest"}.exe`;
   }
   // 文件名不含版本信息时追加版本号，便于日后与下载目录中的文件匹配
-  if (ver && !containsVersion(stemOnly(name), ver)) {
-    const m = name.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
-    name = m ? `${m[1]}-${ver}${m[2]}` : `${name}-${ver}`;
-  }
-  return name;
-}
-
-function stemOnly(name: string): string {
-  return name.replace(/\.[A-Za-z0-9]{1,6}$/, "");
+  return ver && !containsVersion(stemOf(name), ver)
+    ? withVersionSuffix(name, ver)
+    : name;
 }
 
 /** 扫描下载目录文件列表，配合 downloadedPaths 找出各软件已下载的最新安装包 */
@@ -359,63 +334,13 @@ async function startDownload(item: SoftItem, asset?: Asset) {
     settingsOpen.value = true;
     return;
   }
-  await queueDownload({
+  await dlStore.queue({
     itemId: item.id,
     url: a.url,
     fileName: pickFileName(item, a),
     destDir: config.value.settings.downloadDir,
     proxyPrefix: config.value.settings.downloadProxy,
   });
-}
-
-/** 下载参数缓存：暂停/失败后「继续/重试」用同一组参数断点续传 */
-const dlArgs = new Map<string, DownloadArgs>();
-/** 正在网络传输中的下载（不含 暂停/失败 状态） */
-const dlInFlight = new Set<string>();
-
-async function queueDownload(args: DownloadArgs): Promise<void> {
-  // 同一条下载进行中时不重复发起（暂停/失败状态允许重新入队续传）
-  if (dlInFlight.has(args.itemId)) return;
-  dlInFlight.add(args.itemId);
-  dlArgs.set(args.itemId, args);
-  downloadingIds.add(args.itemId);
-  try {
-    await api.download(args);
-    // 正常返回即完成，done 事件已清理状态
-    downloadingIds.delete(args.itemId);
-  } catch (e) {
-    const msg = String(e);
-    if (msg.includes("取消")) {
-      downloadingIds.delete(args.itemId);
-      delete downloads.value[args.itemId];
-    } else if (msg.includes("暂停")) {
-      // 进度事件已置为 paused，保留状态供「继续」
-    } else {
-      markDownloadError(args, msg);
-      toast(`下载失败：${msg}`, "err");
-    }
-  } finally {
-    dlInFlight.delete(args.itemId);
-  }
-}
-
-function markDownloadError(args: DownloadArgs, msg: string) {
-  const prev = downloads.value[args.itemId];
-  downloads.value[args.itemId] = {
-    itemId: args.itemId,
-    fileName: prev?.fileName || args.fileName,
-    received: prev?.received ?? 0,
-    total: prev?.total ?? 0,
-    status: "error",
-    path: "",
-    error: msg,
-  };
-}
-
-/** 继续/重试：用原参数重新发起，后端从 .part 断点续传 */
-function resumeDownload(itemId: string) {
-  const args = dlArgs.get(itemId);
-  if (args) void queueDownload(args);
 }
 
 function markInstalled(item: SoftItem) {
@@ -451,7 +376,7 @@ function onSaveEditor(item: SoftItem) {
 function onDeleteEditor(id: string) {
   if (!window.confirm("确定删除这个软件吗？")) return;
   config.value.items = config.value.items.filter((i) => i.id !== id);
-  delete downloads.value[id];
+  dlStore.drop(id);
   donePaths.value = Object.fromEntries(
     Object.entries(donePaths.value).filter(([k]) => k !== id),
   );
@@ -586,26 +511,26 @@ function openLocal(path: string, reveal = false) {
           :item="it"
           :status="statusOf(it)"
           :checking="checkingIds.has(it.id)"
-          :downloading="downloadingIds.has(it.id)"
-          :dl="downloads[it.id] ?? null"
+          :downloading="dlStore.active.has(it.id)"
+          :dl="dlStore.downloads[it.id] ?? null"
           :done-path="donePaths[it.id] ?? ''"
           :downloaded-path="downloadedPaths[it.id] ?? ''"
           @check="checkOne(it)"
           @edit="openEdit(it)"
-          @download="(a) => startDownload(it, a ?? undefined)"
+          @download="(a: Asset | null) => startDownload(it, a ?? undefined)"
           @pick="pickerItem = it"
-          @cancel="api.cancel(it.id)"
+          @cancel="dlStore.cancel(it.id)"
           @mark="markInstalled(it)"
           @set-installed="
-            (v) => {
+            (v: string) => {
               it.installedVersion = v;
               persist();
             }
           "
-          @open-path="(p, r) => openLocal(p, r)"
+          @open-path="(p: string, r?: boolean) => openLocal(p, r)"
           @open-url="openUrl"
-          @pause="pauseDownload(it.id)"
-          @resume="resumeDownload(it.id)"
+          @pause="dlStore.pause(it.id)"
+          @resume="dlStore.resume(it.id)"
         />
       </template>
     </main>
@@ -617,8 +542,8 @@ function openLocal(path: string, reveal = false) {
       :initial-checks="config.vscodeChecks"
       @open-settings="settingsOpen = true"
       @open-path="openLocal"
-      @notify="notify"
-      @stats="(t, u) => (vsStats = { total: t, updates: u })"
+      @notify="toast"
+      @stats="(t: number, u: number) => (vsStats = { total: t, updates: u })"
       @save-checks="saveVscodeChecks"
     />
 
@@ -697,13 +622,13 @@ function openLocal(path: string, reveal = false) {
       :info="selfInfo"
       :checking="selfChecking"
       :downloading="selfDownloading"
-      :dl="downloads[SELF_DL_ID] ?? null"
+      :dl="dlStore.downloads[SELF_DL_ID] ?? null"
       @check="checkSelf()"
       @download="startSelfDownload"
       @open-url="openUrl"
-      @pause="pauseDownload(SELF_DL_ID)"
-      @resume="resumeSelf"
-      @cancel="api.cancel(SELF_DL_ID)"
+      @pause="dlStore.pause(SELF_DL_ID)"
+      @resume="dlStore.resume(SELF_DL_ID)"
+      @cancel="dlStore.cancel(SELF_DL_ID)"
       @close="selfDialogOpen = false"
     />
 

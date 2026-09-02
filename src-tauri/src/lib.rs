@@ -87,6 +87,15 @@ async fn check_self_update(app: AppHandle, settings: Settings) -> SelfUpdateInfo
     net::check_self_update(&current, &settings).await
 }
 
+/// 后台拉起系统程序（资源管理器/浏览器），不等待其退出
+fn spawn_open(program: &str, arg: &str) -> Result<(), String> {
+    std::process::Command::new(program)
+        .arg(arg)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// 用资源管理器打开目录；reveal 为 true 时定位到文件
 #[tauri::command]
 fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
@@ -97,32 +106,19 @@ fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         if reveal.unwrap_or(false) {
-            std::process::Command::new("explorer")
-                .arg(format!("/select,{p}"))
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            spawn_open("explorer", &format!("/select,{p}"))
         } else {
-            std::process::Command::new("explorer")
-                .arg(p)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            spawn_open("explorer", p)
         }
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(p)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("open", p)
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(p)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("xdg-open", p)
     }
-    Ok(())
 }
 
 /// 用系统默认浏览器打开链接
@@ -134,26 +130,16 @@ fn open_url(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("explorer", u)
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("open", u)
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(u)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        spawn_open("xdg-open", u)
     }
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

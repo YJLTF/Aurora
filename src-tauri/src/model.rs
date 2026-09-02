@@ -52,18 +52,12 @@ pub enum Source {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Asset {
     pub name: String,
     pub url: String,
     pub size: u64,
-}
-
-impl Default for Asset {
-    fn default() -> Self {
-        Self { name: String::new(), url: String::new(), size: 0 }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

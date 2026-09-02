@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { Asset, DownloadProgress, SelfUpdateInfo } from "../types";
-import { fmtSize } from "../utils";
+import DlProgress from "./DlProgress.vue";
+import AssetRadioList from "./AssetRadioList.vue";
 
 const props = defineProps<{
   info: SelfUpdateInfo;
@@ -33,12 +34,6 @@ watch(
 const state = computed(() =>
   props.info.error ? "error" : props.info.hasUpdate ? "update" : "uptodate",
 );
-
-const pct = computed(() => {
-  const d = props.dl;
-  if (!d || !d.total) return 0;
-  return Math.min(100, Math.round((d.received / d.total) * 100));
-});
 
 function picked(): Asset | null {
   return props.info.assets.find((a) => a.url === selected.value) ?? null;
@@ -90,49 +85,21 @@ function picked(): Asset | null {
         <div v-if="state === 'update' && info.assets.length" class="field">
           <span class="flabel">升级安装包</span>
           <div class="asset-col">
-            <label
-              v-for="a in info.assets"
-              :key="a.url"
-              class="asset"
-              :class="{ on: a.url === selected }"
-            >
-              <input v-model="selected" type="radio" name="self-asset" :value="a.url" />
-              <span class="aname mono">{{ a.name }}</span>
-              <span class="asize">{{ fmtSize(a.size) }}</span>
-              <span v-if="info.assets[info.suggested]?.url === a.url" class="arec">推荐</span>
-            </label>
+            <AssetRadioList
+              :assets="info.assets"
+              :suggested="info.suggested"
+              v-model:selected="selected"
+            />
           </div>
         </div>
 
-        <div v-if="dl && dl.status !== 'done'" class="dl" role="status">
-          <div class="bar" :class="{ indet: !dl.total || dl.status === 'error' }">
-            <div class="fill" :style="{ width: pct + '%' }"></div>
-          </div>
-          <span class="dl-text">{{
-            dl.status === "paused"
-              ? `${dl.fileName} · 已暂停 · ${pct}%`
-              : dl.status === "error"
-                ? `${dl.fileName} · ${dl.error}`
-                : dl.total
-                  ? `${dl.fileName} · ${pct}% · ${(dl.received / 1048576).toFixed(1)}/${(dl.total / 1048576).toFixed(1)} MB`
-                  : `${dl.fileName} · ${(dl.received / 1048576).toFixed(1)} MB`
-          }}</span>
-          <button
-            v-if="dl.status === 'progressing'"
-            class="mini"
-            @click="emit('pause')"
-          >
-            暂停
-          </button>
-          <button
-            v-else-if="dl.status === 'paused' || dl.status === 'error'"
-            class="mini"
-            @click="emit('resume')"
-          >
-            {{ dl.status === "paused" ? "继续" : "重试" }}
-          </button>
-          <button class="mini danger" @click="emit('cancel')">取消</button>
-        </div>
+        <DlProgress
+          v-if="dl && dl.status !== 'done'"
+          :dl="dl"
+          @pause="$emit('pause')"
+          @resume="$emit('resume')"
+          @cancel="$emit('cancel')"
+        />
       </div>
 
       <footer class="dlg-foot">

@@ -536,8 +536,9 @@ pub fn cancel_download(state: State<'_, AppState>, item_id: String) {
 
 /// 列出下载目录中的文件名，供前端匹配“最新版本是否已下载”。
 /// 目录不存在或不可读时返回空列表，不让检查流程报错。
+/// async：目录遍历放在工作线程，避免大目录阻塞主线程。
 #[tauri::command]
-pub fn list_downloads(dest_dir: String) -> Result<Vec<String>, String> {
+pub async fn list_downloads(dest_dir: String) -> Result<Vec<String>, String> {
     let dir = std::path::PathBuf::from(dest_dir.trim());
     let mut out = Vec::new();
     let rd = match std::fs::read_dir(&dir) {

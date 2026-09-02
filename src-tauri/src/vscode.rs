@@ -4,7 +4,7 @@
 //! 按扩展包分子文件夹存放），因此递归扫描文件名即可得到清单；
 //! 最新版本通过 VS Marketplace 的 extensionquery 接口批量查询。
 
-use crate::model::{Settings, VsixCheck, VsixInfo, VsixRef};
+use crate::model::{VsixCheck, VsixInfo, VsixRef};
 use crate::version::compare;
 use regex::Regex;
 use serde_json::{json, Value};
@@ -53,9 +53,10 @@ fn parse_stem(stem: &str) -> Option<(String, String, String)> {
     Some((id, version, target.to_string()))
 }
 
-/// 递归扫描目录下的 .vsix 文件；目录不存在或不可读时返回空列表
+/// 递归扫描目录下的 .vsix 文件；目录不存在或不可读时返回空列表。
+/// async：目录遍历放在工作线程，避免大目录阻塞主线程。
 #[tauri::command]
-pub fn list_vsix(dir: String) -> Result<Vec<VsixInfo>, String> {
+pub async fn list_vsix(dir: String) -> Result<Vec<VsixInfo>, String> {
     let root = Path::new(dir.trim());
     let mut out = Vec::new();
     if !root.is_dir() {
@@ -99,7 +100,7 @@ pub fn list_vsix(dir: String) -> Result<Vec<VsixInfo>, String> {
 
 /// 读取本机 VSCode 已安装扩展的版本表（id 小写 → 版本）；读不到时返回空表
 #[tauri::command]
-pub fn read_installed_extensions() -> Result<HashMap<String, String>, String> {
+pub async fn read_installed_extensions() -> Result<HashMap<String, String>, String> {
     let mut map = HashMap::new();
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -142,11 +143,7 @@ pub fn read_installed_extensions() -> Result<HashMap<String, String>, String> {
 
 /// 批量检查插件更新：一次 Marketplace 查询取全部最新版本与下载直链
 #[tauri::command]
-pub async fn check_vscode_updates(
-    items: Vec<VsixRef>,
-    settings: Settings,
-) -> Result<Vec<VsixCheck>, String> {
-    let _ = &settings;
+pub async fn check_vscode_updates(items: Vec<VsixRef>) -> Result<Vec<VsixCheck>, String> {
     if items.is_empty() {
         return Ok(vec![]);
     }

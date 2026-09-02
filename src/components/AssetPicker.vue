@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import type { Asset, SoftItem } from "../types";
-import { fmtSize } from "../utils";
+import AssetRadioList from "./AssetRadioList.vue";
 
 const props = defineProps<{ item: SoftItem }>();
 
@@ -27,17 +27,12 @@ function picked(): Asset | null {
 
       <div class="dlg-body asset-list">
         <p v-if="!item.assets.length" class="empty-hint">没有可下载的附件</p>
-        <label
-          v-for="a in item.assets"
-          :key="a.url"
-          class="asset"
-          :class="{ on: a.url === selected }"
-        >
-          <input v-model="selected" type="radio" name="asset" :value="a.url" />
-          <span class="aname mono">{{ a.name }}</span>
-          <span class="asize">{{ fmtSize(a.size) }}</span>
-          <span v-if="item.assets[item.suggested]?.url === a.url" class="arec">推荐</span>
-        </label>
+        <AssetRadioList
+          v-else
+          v-model:selected="selected"
+          :assets="item.assets"
+          :suggested="item.suggested"
+        />
       </div>
 
       <footer class="dlg-foot">

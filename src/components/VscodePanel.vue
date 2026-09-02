@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { api } from "../api";
+import { dlStore } from "../download";
 import { compareVersion } from "../types";
-import type { DownloadProgress, Settings, VsixCheck } from "../types";
+import type { Settings, VsixCheck } from "../types";
 import { joinPath, timeAgo } from "../utils";
+import DlProgress from "./DlProgress.vue";
 
 const props = defineProps<{
   settings: Settings;
@@ -27,6 +29,10 @@ interface VsRow {
   dir: string;
 }
 
+interface VsViewRow extends VsRow {
+  status: VStatus;
+}
+
 type VStatus = "idle" | "update" | "uptodate" | "error";
 
 const rows = ref<VsRow[]>([]);
@@ -35,15 +41,8 @@ const checks = ref<Record<string, VsixCheck>>({});
 const busy = reactive({ scanning: false, checking: false });
 const scanned = ref(false);
 const scanError = ref("");
-const downloads = ref<Record<string, DownloadProgress>>({});
 
 const dir = computed(() => props.settings.vscodeDir.trim());
-
-// 独立订阅下载进度；完成/失败提示由 App 的全局监听统一弹出
-void api.onProgress((p) => {
-  if (p.status === "progressing" || p.status === "paused") downloads.value[p.itemId] = p;
-  else delete downloads.value[p.itemId];
-});
 
 // 面板随视图常驻（v-show），配置异步就绪或目录变更时（重新）扫描
 watch(
@@ -112,7 +111,7 @@ async function check() {
       target: r.target,
       localVersion: r.version,
     }));
-    const list = await api.checkVscodeUpdates(items, props.settings);
+    const list = await api.checkVscodeUpdates(items);
     const now = Date.now();
     for (const c of list) c.checkedAt = now;
     applyChecks(list);
@@ -153,8 +152,13 @@ const statusLabel: Record<VStatus, string> = {
   error: "检查失败",
 };
 
+/** 状态随 checks/rows 变化统一预计算，避免模板里每格重复求值 */
+const viewRows = computed<VsViewRow[]>(() =>
+  rows.value.map((r) => ({ ...r, status: statusOf(r) })),
+);
+
 const updateCount = computed(
-  () => rows.value.filter((r) => statusOf(r) === "update").length,
+  () => viewRows.value.filter((r) => r.status === "update").length,
 );
 
 function latestOf(r: VsRow): string {
@@ -165,66 +169,30 @@ function checkedAtOf(r: VsRow): number {
   return checks.value[r.id.toLowerCase()]?.checkedAt ?? 0;
 }
 
-function downloadOf(r: VsRow): DownloadProgress | null {
-  return downloads.value[`vsix:${r.id}`] ?? null;
+function vsixKey(id: string): string {
+  return `vsix:${id}`;
 }
 
-/** 进行中的下载不允许重复发起；暂停/失败状态允许重新入队续传 */
-async function download(r: VsRow) {
+function downloadOf(r: VsRow) {
+  return dlStore.downloads[vsixKey(r.id)] ?? null;
+}
+
+/** 下载新版 vsix；进行中的同一条由共享队列去重，暂停/失败可重新入队续传 */
+function download(r: VsRow) {
   const c = checks.value[r.id.toLowerCase()];
-  const key = `vsix:${r.id}`;
-  const prev = downloads.value[key];
-  if (!c?.downloadUrl || prev?.status === "progressing") return;
-  const name = `${r.id}-${c.latestVersion}${r.target ? `-${r.target}` : ""}.vsix`;
-  const args = {
-    itemId: key,
+  if (!c?.downloadUrl) return;
+  dlStore.queue({
+    itemId: vsixKey(r.id),
     url: c.downloadUrl,
-    fileName: name,
+    fileName: `${r.id}-${c.latestVersion}${r.target ? `-${r.target}` : ""}.vsix`,
     destDir: r.dir,
     proxyPrefix: props.settings.downloadProxy,
     preferIpv4: true,
-  };
-  try {
-    await api.download(args);
-  } catch (e) {
-    const msg = String(e);
-    if (msg.includes("取消")) {
-      delete downloads.value[key];
-    } else if (msg.includes("暂停")) {
-      // 进度事件已置为 paused，保留状态供「继续」
-    } else {
-      downloads.value[key] = {
-        itemId: key,
-        fileName: prev?.fileName || name,
-        received: prev?.received ?? 0,
-        total: prev?.total ?? 0,
-        status: "error",
-        path: "",
-        error: msg,
-      };
-      emit("notify", `${r.id} 下载失败：${msg}`, "err");
-    }
-  }
+  });
 }
 
 function emitStats() {
   emit("stats", rows.value.length, updateCount.value);
-}
-
-function pctOf(p: DownloadProgress): number {
-  if (!p.total) return 0;
-  return Math.min(100, Math.round((p.received / p.total) * 100));
-}
-
-function dlTextOf(r: VsRow): string {
-  const p = downloadOf(r);
-  if (!p) return "";
-  const size = p.total
-    ? `${pctOf(p)}% · ${(p.received / 1048576).toFixed(1)}/${(p.total / 1048576).toFixed(1)} MB`
-    : `${(p.received / 1048576).toFixed(1)} MB`;
-  if (p.status === "paused") return `${p.fileName} · 已暂停 · ${size}`;
-  if (p.status === "error") return `${p.fileName} · ${p.error}`;
-  return `${p.fileName} · ${size}`;
 }
 </script>
 
@@ -242,15 +210,15 @@ function dlTextOf(r: VsRow): string {
 
     <div v-else class="vc-list">
       <div
-        v-for="r in rows"
-        :key="r.id + r.dir"
+        v-for="r in viewRows"
+        :key="r.id"
         class="vrow"
-        :data-status="statusOf(r)"
+        :data-status="r.status"
       >
         <div class="vmain">
           <div class="vid" :title="r.id">
             {{ r.id }}
-            <span class="pill" :class="statusOf(r)">{{ statusLabel[statusOf(r)] }}</span>
+            <span class="pill" :class="r.status">{{ statusLabel[r.status] }}</span>
           </div>
           <div class="vsub" :title="r.dir">{{ r.fileName }}</div>
         </div>
@@ -266,7 +234,7 @@ function dlTextOf(r: VsRow): string {
           <span class="vlabel">最新版本</span>
           <div
             class="ver"
-            :class="{ hot: statusOf(r) === 'update', ok: statusOf(r) === 'uptodate' }"
+            :class="{ hot: r.status === 'update', ok: r.status === 'uptodate' }"
             :title="checkedAtOf(r) ? `${timeAgo(checkedAtOf(r))}检查` : ''"
           >
             {{ latestOf(r) }}
@@ -274,7 +242,7 @@ function dlTextOf(r: VsRow): string {
         </div>
         <div class="vops">
           <button
-            v-if="statusOf(r) === 'update' && !downloadOf(r)"
+            v-if="r.status === 'update' && !downloadOf(r)"
             class="btn primary sm"
             title="下载新版 vsix 到备份目录"
             @click="download(r)"
@@ -289,29 +257,14 @@ function dlTextOf(r: VsRow): string {
             定位
           </button>
         </div>
-        <div v-if="downloadOf(r)" class="dl dl-inline" role="status">
-          <div class="bar" :class="{ indet: !downloadOf(r)!.total }">
-            <div class="fill" :style="{ width: pctOf(downloadOf(r)!) + '%' }"></div>
-          </div>
-          <span class="dl-text">{{
-            dlTextOf(r)
-          }}</span>
-          <button
-            v-if="downloadOf(r)!.status === 'progressing'"
-            class="mini"
-            @click="api.pause(`vsix:${r.id}`)"
-          >
-            暂停
-          </button>
-          <button
-            v-else-if="downloadOf(r)!.status === 'paused' || downloadOf(r)!.status === 'error'"
-            class="mini"
-            @click="download(r)"
-          >
-            {{ downloadOf(r)!.status === "paused" ? "继续" : "重试" }}
-          </button>
-          <button class="mini danger" @click="api.cancel(`vsix:${r.id}`)">取消</button>
-        </div>
+        <DlProgress
+          v-if="downloadOf(r)"
+          class="dl-inline"
+          :dl="downloadOf(r)!"
+          @pause="dlStore.pause(vsixKey(r.id))"
+          @resume="dlStore.resume(vsixKey(r.id))"
+          @cancel="dlStore.cancel(vsixKey(r.id))"
+        />
       </div>
     </div>
   </div>

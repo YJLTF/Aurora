@@ -34,8 +34,14 @@ export function slugify(name: string): string {
 }
 
 /** 去掉扩展名的文件主干 */
-function stemOf(name: string): string {
+export function stemOf(name: string): string {
   return name.replace(/\.[A-Za-z0-9]{1,6}$/, "");
+}
+
+/** 文件名不含版本号时把版本追加到扩展名前（setup.exe → setup-1.2.3.exe） */
+export function withVersionSuffix(name: string, version: string): string {
+  const m = name.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
+  return m ? `${m[1]}-${version}${m[2]}` : `${name}-${version}`;
 }
 
 /** 主干中是否出现独立、边界干净的版本串（避免 2.0.1 误命中 2.0.10） */

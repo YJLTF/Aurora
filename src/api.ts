@@ -84,9 +84,9 @@ export const api = {
   },
 
   /** 批量检查 VSCode 插件的 Marketplace 更新 */
-  checkVscodeUpdates(items: VsixRef[], settings: Settings): Promise<VsixCheck[]> {
+  checkVscodeUpdates(items: VsixRef[]): Promise<VsixCheck[]> {
     if (!isTauri) return Promise.resolve(mockVscodeChecks(items));
-    return call<VsixCheck[]>("check_vscode_updates", { items, settings });
+    return call<VsixCheck[]>("check_vscode_updates", { items });
   },
 
   download(args: DownloadArgs): Promise<string> {
