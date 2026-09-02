@@ -61,6 +61,8 @@ src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 pa
 - **Marketplace 请求必须走 IPv4 优先客户端**，直连会在 IPv6 上挂起（表现为请求 30s 超时）。
 - Windows 下下载重命名前必须先 drop 文件句柄（`pump` 中的 `drop(file)`），否则 remove/rename 报错。
 - **GUI 进程 spawn npm 必须 Windows 经 `cmd /C npm …` + `CREATE_NO_WINDOW`**：直接 spawn `npm` 会因 npm.cmd 失败；探测失败时引导用户在设置里手填全局目录。
+- **WebView2 的 `navigator.clipboard` 不可靠**（可能静默挂起、成败都无回调）：写剪贴板统一走后端 `copy_text` 命令（arboard），不要在前端直接调 clipboard API。
+- **npm 管道模式（非 TTY）下几乎静默**：安装过程中途没有输出，直到结束才一次性打印。升级进度靠「spawn 后立即 emit 一条已启动 + `--loglevel=info` 中间日志 + 前端已用时秒数」兜底，不要指望 npm 持续吐进度。
 - **tauri 命令内避免「闭包映射出 async block」**（如 `items.iter().map(|x| async move {…})`）：generate_handler 包装要求生命周期泛化，会报 `implementation of FnOnce is not general enough`。解法：用 for 循环把 owned 值 clone 进 future 列表（参见 `npm.rs::check_npm_updates`）。
 
 ## 提交规范

@@ -279,14 +279,17 @@ fn valid_pkg_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '.' | '_' | '-'))
 }
 
-/// 构造 `npm install -g <pkg> --no-fund --no-audit`（GUI 进程须规避 npm.cmd 与窗口闪烁）
+/// 构造 `npm install -g <pkg> --no-fund --no-audit --loglevel=info`（GUI 进程须规避 npm.cmd 与窗口闪烁；
+/// 管道模式下 npm 默认几乎静默，info 级让安装过程有逐行日志可展示）
 fn spawn_upgrade(name: &str) -> Result<std::process::Child, String> {
     let pkg = format!("{name}@latest");
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
-            .args(["/C", "npm", "install", "-g", &pkg, "--no-fund", "--no-audit"])
+            .args([
+                "/C", "npm", "install", "-g", &pkg, "--no-fund", "--no-audit", "--loglevel=info",
+            ])
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -297,7 +300,9 @@ fn spawn_upgrade(name: &str) -> Result<std::process::Child, String> {
     #[cfg(not(target_os = "windows"))]
     {
         std::process::Command::new("npm")
-            .args(["install", "-g", &pkg, "--no-fund", "--no-audit"])
+            .args([
+                "install", "-g", &pkg, "--no-fund", "--no-audit", "--loglevel=info",
+            ])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
@@ -375,6 +380,17 @@ pub async fn npm_upgrade(
             name: name.clone(),
             status: "preparing".into(),
             output: String::new(),
+            error: String::new(),
+            local_version: String::new(),
+        },
+    );
+    // npm 管道模式日志稀疏：先推一条已启动，避免前端长时间停留在「正在准备」
+    let _ = app.emit(
+        UPGRADE_EVENT,
+        NpmUpgradeProgress {
+            name: name.clone(),
+            status: "progressing".into(),
+            output: format!("npm install -g {name}@latest 已启动"),
             error: String::new(),
             local_version: String::new(),
         },

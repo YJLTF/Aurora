@@ -174,6 +174,12 @@ export const api = {
     return call("open_path", { path, reveal });
   },
 
+  /** 写系统剪贴板（走后端，WebView2 的 navigator.clipboard 不可靠） */
+  copyText(text: string): Promise<void> {
+    if (!isTauri) return navigator.clipboard.writeText(text);
+    return call("copy_text", { text });
+  },
+
   openUrl(url: string): Promise<void> {
     if (!isTauri) {
       window.open(url, "_blank");

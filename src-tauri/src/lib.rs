@@ -122,6 +122,15 @@ fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
     }
 }
 
+/// 写系统剪贴板：WebView2 的 navigator.clipboard 在部分环境会静默挂起，
+/// 统一走后端保证成败都有明确返回
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.set_text(text))
+        .map_err(|e| format!("写入剪贴板失败: {e}"))
+}
+
 /// 用系统默认浏览器打开链接
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
@@ -167,6 +176,7 @@ pub fn run() {
             npm::npm_upgrade,
             npm::npm_cancel_upgrade,
             open_path,
+            copy_text,
             open_url
         ])
         .run(tauri::generate_context!())

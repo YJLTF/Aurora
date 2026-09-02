@@ -45,6 +45,8 @@ interface UpgState {
   status: UpgStatus;
   output: string;
   error: string;
+  /** 本地记录的启动时间，用于展示已用时 */
+  startedAt: number;
 }
 const upgrades = ref<Record<string, UpgState>>({});
 const anyUpgrading = computed(() =>
@@ -52,6 +54,21 @@ const anyUpgrading = computed(() =>
     (u) => u.status === "preparing" || u.status === "progressing",
   ),
 );
+
+/** 升级进行中每秒跳一次，驱动「已用时」刷新 */
+const nowTick = ref(0);
+let upgTimer: ReturnType<typeof setInterval> | undefined;
+watch(anyUpgrading, (on) => {
+  clearInterval(upgTimer);
+  if (on) upgTimer = setInterval(() => (nowTick.value += 1), 1000);
+});
+
+/** 安装中显示已用时秒数（npm 管道模式日志稀疏，安静期也给进度感） */
+function elapsedSuffix(u: UpgState): string {
+  void nowTick.value;
+  if (u.status !== "preparing" && u.status !== "progressing") return "";
+  return ` ${Math.max(1, Math.round((Date.now() - u.startedAt) / 1000))}s`;
+}
 
 // 面板随视图常驻，手动全局目录变更时自动重扫
 watch(
@@ -175,7 +192,7 @@ function upgradeCmd(r: NpmRow): string {
 
 async function copyUpgrade(r: NpmRow) {
   try {
-    await navigator.clipboard.writeText(upgradeCmd(r));
+    await api.copyText(upgradeCmd(r));
     emit("notify", `已复制：${upgradeCmd(r)}`, "ok");
   } catch {
     emit("notify", "复制失败，请手动输入升级命令", "err");
@@ -201,7 +218,12 @@ const upgLabel: Record<UpgStatus, string> = {
 /** 执行更新：后端 npm install -g，进度经 onUpgrade 事件回流（全局串行） */
 function upgrade(r: NpmRow) {
   if (anyUpgrading.value) return;
-  upgrades.value[r.name] = { status: "preparing", output: "", error: "" };
+  upgrades.value[r.name] = {
+    status: "preparing",
+    output: "",
+    error: "",
+    startedAt: Date.now(),
+  };
   api.npmUpgrade(r.name, props.settings.npmGlobalRoot).catch((e) => {
     // 命令本身被拒（如包名校验失败），事件流不会再来终态
     const cur = upgrades.value[r.name];
@@ -223,17 +245,23 @@ function dismissUpgrade(r: NpmRow) {
 function handleUpgrade(p: NpmUpgradeProgress) {
   const cur = upgrades.value[p.name];
   if (p.status === "preparing") {
-    upgrades.value[p.name] = { status: p.status, output: "", error: "" };
+    upgrades.value[p.name] = {
+      status: p.status,
+      output: "",
+      error: "",
+      startedAt: cur?.startedAt ?? Date.now(),
+    };
     return;
   }
   if (p.status === "progressing") {
-    if (cur) upgrades.value[p.name] = { ...cur, status: p.status, output: p.output };
+    if (cur)
+      upgrades.value[p.name] = { ...cur, status: p.status, output: p.output };
     return;
   }
   // 终态（后端终态事件不带 output，保留此前最后一行输出供查看）
   const output = p.output || cur?.output || "";
   if (p.status === "done") {
-    upgrades.value[p.name] = { status: "done", output, error: "" };
+    upgrades.value[p.name] = { status: "done", output, error: "", startedAt: cur?.startedAt ?? 0 };
     const row = rows.value.find((r) => r.name === p.name);
     if (row && p.localVersion) row.version = p.localVersion;
     const c = checks.value[p.name.toLowerCase()];
@@ -261,13 +289,23 @@ function handleUpgrade(p: NpmUpgradeProgress) {
       if (upgrades.value[p.name]?.status === "done") delete upgrades.value[p.name];
     }, 2500);
   } else if (p.status === "cancelled") {
-    upgrades.value[p.name] = { status: "cancelled", output, error: "" };
+    upgrades.value[p.name] = {
+      status: "cancelled",
+      output,
+      error: "",
+      startedAt: cur?.startedAt ?? 0,
+    };
     emit("notify", `${p.name} 升级已取消`, "info");
     setTimeout(() => {
       if (upgrades.value[p.name]?.status === "cancelled") delete upgrades.value[p.name];
     }, 2000);
   } else {
-    upgrades.value[p.name] = { status: "error", output, error: p.error || "升级失败" };
+    upgrades.value[p.name] = {
+      status: "error",
+      output,
+      error: p.error || "升级失败",
+      startedAt: cur?.startedAt ?? 0,
+    };
     emit("notify", `${p.name} 升级失败：${p.error || "详见输出"}`, "err");
   }
 }
@@ -354,7 +392,7 @@ defineExpose({ scan, check, busy, handleUpgrade });
           <span
             class="upg-label"
             :class="{ err: upgradeOf(r)!.status === 'error' }"
-          >{{ upgLabel[upgradeOf(r)!.status] }}</span>
+          >{{ upgLabel[upgradeOf(r)!.status] }}{{ elapsedSuffix(upgradeOf(r)!) }}</span>
           <span class="upg-output" :title="upgradeOf(r)!.error || upgradeOf(r)!.output">
             {{ upgradeOf(r)!.output || upgradeOf(r)!.error || "…" }}
           </span>
