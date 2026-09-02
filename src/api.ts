@@ -3,6 +3,10 @@ import type {
   CheckOutcome,
   Config,
   DownloadProgress,
+  NpmCheck,
+  NpmInfo,
+  NpmRef,
+  NpmUpgradeProgress,
   SelfUpdateInfo,
   SoftItem,
   Settings,
@@ -20,6 +24,11 @@ import {
   mockListVsix,
   mockInstalledExtensions,
   mockVscodeChecks,
+  mockNpmRoot,
+  mockScanNpm,
+  mockNpmChecks,
+  mockNpmUpgrade,
+  mockNpmCancelUpgrade,
 } from "./mock";
 
 const isTauri =
@@ -42,6 +51,9 @@ export interface DownloadArgs {
 
 type ProgressHandler = (p: DownloadProgress) => void;
 const mockHandlers = new Set<ProgressHandler>();
+
+type UpgradeHandler = (p: NpmUpgradeProgress) => void;
+const mockUpgradeHandlers = new Set<UpgradeHandler>();
 
 export const api = {
   isTauri,
@@ -89,6 +101,49 @@ export const api = {
     return call<VsixCheck[]>("check_vscode_updates", { items });
   },
 
+  /** 解析 npm 全局目录：手动指定优先，否则执行 npm root -g */
+  npmDetectRoot(manual: string): Promise<string> {
+    if (!isTauri) return Promise.resolve(mockNpmRoot());
+    return call<string>("npm_detect_root", { manual });
+  },
+
+  /** 扫描 npm 全局目录中的包（含 @scope，本地版本读各包 package.json） */
+  scanNpm(root: string): Promise<NpmInfo[]> {
+    if (!isTauri) return Promise.resolve(mockScanNpm());
+    return call<NpmInfo[]>("scan_npm", { root });
+  },
+
+  /** 批量检查 npm 全局包的 registry 更新 */
+  checkNpmUpdates(items: NpmRef[], settings: Settings): Promise<NpmCheck[]> {
+    if (!isTauri) return Promise.resolve(mockNpmChecks(items));
+    return call<NpmCheck[]>("check_npm_updates", { items, settings });
+  },
+
+  /** 执行 npm install -g <name>@latest；进度经 onUpgrade 推送 */
+  npmUpgrade(name: string, manualRoot: string): Promise<void> {
+    if (!isTauri) return mockNpmUpgrade(name, (p) => mockUpgradeHandlers.forEach((h) => h(p)));
+    return call("npm_upgrade", { name, manualRoot });
+  },
+
+  /** 取消进行中的升级（杀 npm 进程树，事件里会收到 cancelled） */
+  npmCancelUpgrade(name: string): Promise<void> {
+    if (!isTauri) return Promise.resolve(mockNpmCancelUpgrade(name));
+    return call("npm_cancel_upgrade", { name });
+  },
+
+  /** 订阅 npm 升级进度，返回取消订阅函数；App.vue 全局唯一订阅 */
+  async onUpgrade(handler: UpgradeHandler): Promise<() => void> {
+    if (isTauri) {
+      const { listen } = await import("@tauri-apps/api/event");
+      const un = await listen<NpmUpgradeProgress>("npm-upgrade-progress", (e) =>
+        handler(e.payload),
+      );
+      return un;
+    }
+    mockUpgradeHandlers.add(handler);
+    return () => mockUpgradeHandlers.delete(handler);
+  },
+
   download(args: DownloadArgs): Promise<string> {
     if (!isTauri) return mockDownload(args, (p) => mockHandlers.forEach((h) => h(p)));
     return call<string>("download_file", args);
@@ -117,6 +172,12 @@ export const api = {
       return Promise.resolve();
     }
     return call("open_path", { path, reveal });
+  },
+
+  /** 写系统剪贴板（走后端，WebView2 的 navigator.clipboard 不可靠） */
+  copyText(text: string): Promise<void> {
+    if (!isTauri) return navigator.clipboard.writeText(text);
+    return call("copy_text", { text });
   },
 
   openUrl(url: string): Promise<void> {

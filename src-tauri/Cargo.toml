@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.2.0"
+version = "0.3.0"
 description = "Aurora - 常用软件更新检查与升级包下载工具"
 edition = "2021"
 
@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
 regex = "1"
+arboard = "3"
 futures-util = "0.3"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 

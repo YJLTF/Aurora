@@ -8,6 +8,10 @@ import type {
   CheckOutcome,
   Config,
   DownloadProgress,
+  NpmCheck,
+  NpmInfo,
+  NpmRef,
+  NpmUpgradeProgress,
   SelfUpdateInfo,
   SoftItem,
   Settings,
@@ -48,9 +52,12 @@ export function mockConfig(): Config {
       downloadProxy: "",
       githubToken: "",
       vscodeDir: "C:\\Users\\demo\\Downloads\\vscode",
+      npmGlobalRoot: "",
+      npmRegistry: "https://registry.npmjs.org",
       autoCheckSelf: true,
     },
     vscodeChecks: [],
+    npmChecks: [],
     items: [
       gh("cherry-studio", "Cherry Studio", "🍒", "CherryHQ/cherry-studio", "https://cherryai.com.cn/download"),
       {
@@ -164,21 +171,21 @@ export function mockDownloadList(): string[] {
 }
 
 export function mockAppInfo(): AppInfo {
-  return { version: "0.2.0", repo: "YJLTF/Aurora" };
+  return { version: "0.3.0", repo: "YJLTF/Aurora" };
 }
 
-/** 模拟自更新：0.2.0 → 0.3.0 */
+/** 模拟自更新：0.3.0 → 0.4.0 */
 export async function mockSelfUpdate(_settings: Settings): Promise<SelfUpdateInfo> {
   await wait(600);
   return {
-    currentVersion: "0.2.0",
-    latestVersion: "0.3.0",
+    currentVersion: "0.3.0",
+    latestVersion: "0.4.0",
     hasUpdate: true,
-    releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.3.0",
-    notes: "### v0.3.0（模拟数据）\n- 新增 VSCode 插件更新检查\n- 界面细节优化",
+    releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.4.0",
+    notes: "### v0.4.0（模拟数据）\n- 新增 NPM 全局包更新检查\n- 界面细节优化",
     assets: [
-      { name: "Aurora_0.3.0_x64-setup.exe", url: "https://example.com/Aurora_0.3.0_x64-setup.exe", size: 8_800_000 },
-      { name: "Aurora_0.3.0_arm64-setup.exe", url: "https://example.com/Aurora_0.3.0_arm64-setup.exe", size: 8_100_000 },
+      { name: "Aurora_0.4.0_x64-setup.exe", url: "https://example.com/Aurora_0.4.0_x64-setup.exe", size: 8_800_000 },
+      { name: "Aurora_0.4.0_arm64-setup.exe", url: "https://example.com/Aurora_0.4.0_arm64-setup.exe", size: 8_100_000 },
     ],
     suggested: 0,
     error: "",
@@ -232,5 +239,87 @@ export async function mockVscodeChecks(items: VsixRef[]): Promise<VsixCheck[]> {
       checkedAt: now,
       error: latest ? "" : "模拟数据中无此插件",
     };
+  });
+}
+
+const MOCK_NPM_ROOT = "C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules";
+
+export function mockNpmRoot(): string {
+  return MOCK_NPM_ROOT;
+}
+
+const MOCK_NPM: NpmInfo[] = [
+  { name: "@anthropic-ai/claude-code", version: "1.0.0", dir: `${MOCK_NPM_ROOT}\\@anthropic-ai\\claude-code` },
+  { name: "@types/node", version: "22.5.0", dir: `${MOCK_NPM_ROOT}\\@types\\node` },
+  { name: "eslint", version: "9.9.0", dir: `${MOCK_NPM_ROOT}\\eslint` },
+  { name: "npm-check-updates", version: "17.0.3", dir: `${MOCK_NPM_ROOT}\\npm-check-updates` },
+  { name: "pnpm", version: "9.6.0", dir: `${MOCK_NPM_ROOT}\\pnpm` },
+  { name: "typescript", version: "5.5.4", dir: `${MOCK_NPM_ROOT}\\typescript` },
+];
+
+export function mockScanNpm(): NpmInfo[] {
+  return MOCK_NPM;
+}
+
+const NPM_LATEST: Record<string, string> = {
+  "@anthropic-ai/claude-code": "1.0.12",
+  "@types/node": "22.5.1",
+  eslint: "9.9.1",
+  "npm-check-updates": "17.1.0",
+  pnpm: "9.6.0",
+  typescript: "5.9.2",
+};
+
+export async function mockNpmChecks(items: NpmRef[]): Promise<NpmCheck[]> {
+  await wait(400 + Math.random() * 500);
+  const now = Date.now();
+  return items.map((it) => {
+    const latest = NPM_LATEST[it.name.toLowerCase()] ?? "";
+    return {
+      name: it.name,
+      localVersion: it.localVersion,
+      latestVersion: latest,
+      hasUpdate: latest ? compareVersion(latest, it.localVersion) > 0 : false,
+      checkedAt: now,
+      error: latest ? "" : "模拟数据中无此包",
+    };
+  });
+}
+
+/** 模拟升级的取消标记（包名小写） */
+const NPM_UPGRADE_CANCELLED = new Set<string>();
+
+export function mockNpmCancelUpgrade(name: string): void {
+  NPM_UPGRADE_CANCELLED.add(name.toLowerCase());
+}
+
+export async function mockNpmUpgrade(
+  name: string,
+  emit: (p: NpmUpgradeProgress) => void,
+): Promise<void> {
+  const key = name.toLowerCase();
+  NPM_UPGRADE_CANCELLED.delete(key);
+  emit({ name, status: "preparing", output: "", error: "", localVersion: "" });
+  const steps = ["⠋ idealTree:dev 依赖计算", "reify:提取 tar 包内容", "run @latest postinstall", "link 全局 bin 链接"];
+  for (const step of steps) {
+    await wait(450);
+    if (NPM_UPGRADE_CANCELLED.has(key)) {
+      emit({ name, status: "cancelled", output: "", error: "", localVersion: "" });
+      return;
+    }
+    emit({ name, status: "progressing", output: step, error: "", localVersion: "" });
+  }
+  await wait(400);
+  if (NPM_UPGRADE_CANCELLED.has(key)) {
+    emit({ name, status: "cancelled", output: "", error: "", localVersion: "" });
+    return;
+  }
+  const latest = NPM_LATEST[key] ?? "";
+  emit({
+    name,
+    status: "done",
+    output: `added 1 package in ${(2 + Math.random() * 3).toFixed(0)}s`,
+    error: "",
+    localVersion: latest,
   });
 }

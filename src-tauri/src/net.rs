@@ -54,7 +54,7 @@ pub(crate) fn client_with_ipv4_pref(host: &str) -> reqwest::Client {
 }
 
 /// 从 URL 提取主机名（用于 IPv4 优先解析）
-fn host_of(url: &str) -> String {
+pub(crate) fn host_of(url: &str) -> String {
     let rest = url.split("://").nth(1).unwrap_or("");
     rest.split(['/']).next().unwrap_or("").to_string()
 }
