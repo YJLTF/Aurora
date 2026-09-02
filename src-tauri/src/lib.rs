@@ -147,6 +147,7 @@ fn open_url(url: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(net::AppState::default())
+        .manage(npm::NpmState::default())
         .invoke_handler(tauri::generate_handler![
             load_data,
             save_data,
@@ -163,6 +164,8 @@ pub fn run() {
             npm::npm_detect_root,
             npm::scan_npm,
             npm::check_npm_updates,
+            npm::npm_upgrade,
+            npm::npm_cancel_upgrade,
             open_path,
             open_url
         ])

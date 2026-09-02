@@ -7,11 +7,43 @@
 use crate::model::{NpmCheck, NpmInfo, NpmRef, Settings};
 use crate::version::compare;
 use futures_util::stream::{self, StreamExt};
+use serde::Serialize;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter, State};
 
 /// registry 并发请求数上限（registry 无批量接口，逐包查询）
 const CHECK_CONCURRENCY: usize = 6;
+
+/// npm 升级进度事件名（与 download-progress 同级的全局唯一订阅事件）
+pub const UPGRADE_EVENT: &str = "npm-upgrade-progress";
+
+/// npm 升级进度（preparing/progressing/done/error/cancelled；done 回填升级后版本）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmUpgradeProgress {
+    pub name: String,
+    pub status: String,
+    /// 最近一行 npm 输出（error 时为错误摘要）
+    pub output: String,
+    pub error: String,
+    /// done 时回填升级后的本地版本（重读 package.json，读不到为空）
+    pub local_version: String,
+}
+
+/// npm 升级运行态：活动子进程与取消标记
+#[derive(Default)]
+pub struct NpmState {
+    /// 进行中的升级子进程（包名 → OS PID），用于取消
+    pub children: std::sync::Mutex<HashMap<String, u32>>,
+    /// 取消标记（包名），升级结束时消费
+    pub cancels: std::sync::Mutex<HashSet<String>>,
+}
+
+/// 全局串行化升级：并发 `npm install -g` 会在全局目录与缓存上竞争
+static UPGRADE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// scoped 包名的 URL 编码：@scope/name → @scope%2Fname
 fn encode_name(name: &str) -> String {
@@ -238,9 +270,201 @@ pub async fn check_npm_updates(
     Ok(out)
 }
 
+/// npm 包名白名单字符：防止拼进 shell 命令的注入风险
+fn valid_pkg_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 214
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '.' | '_' | '-'))
+}
+
+/// 构造 `npm install -g <pkg> --no-fund --no-audit`（GUI 进程须规避 npm.cmd 与窗口闪烁）
+fn spawn_upgrade(name: &str) -> Result<std::process::Child, String> {
+    let pkg = format!("{name}@latest");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("cmd")
+            .args(["/C", "npm", "install", "-g", &pkg, "--no-fund", "--no-audit"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("启动 npm 失败（{e}），请确认已安装 Node.js"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("npm")
+            .args(["install", "-g", &pkg, "--no-fund", "--no-audit"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("启动 npm 失败（{e}），请确认已安装 Node.js"))
+    }
+}
+
+/// 起一个读线程把 npm 输出逐行转发为 progressing 事件
+fn spawn_reader<R: std::io::Read + Send + 'static>(
+    pipe: R,
+    app: AppHandle,
+    name: String,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            let _ = app.emit(
+                UPGRADE_EVENT,
+                NpmUpgradeProgress {
+                    name: name.clone(),
+                    status: "progressing".into(),
+                    output: t.to_string(),
+                    error: String::new(),
+                    local_version: String::new(),
+                },
+            );
+        }
+    })
+}
+
+/// 升级完成后重读该包 package.json，取升级后的本地版本
+fn installed_version_after_upgrade(manual_root: &str, name: &str) -> String {
+    let Ok(root) = detect_root_blocking(manual_root) else {
+        return String::new();
+    };
+    // "@scope/name" 逐段下钻，普通名只有一段
+    let mut p = PathBuf::from(root);
+    for seg in name.split('/') {
+        p.push(seg);
+    }
+    read_pkg(&p).map(|(_, v)| v).unwrap_or_default()
+}
+
+/// 执行 `npm install -g <name>@latest`：输出经 npm-upgrade-progress 逐行推送，
+/// 结束时推 done/error/cancelled。升级全程全局串行，避免 -g 目录竞争。
+#[tauri::command]
+pub async fn npm_upgrade(
+    app: AppHandle,
+    state: State<'_, NpmState>,
+    name: String,
+    manual_root: String,
+) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if !valid_pkg_name(&name) {
+        return Err(format!("非法的包名：{name}"));
+    }
+    let manual_root = manual_root.trim().to_string();
+    let _guard = UPGRADE_LOCK.lock().await;
+    state.cancels.lock().unwrap().remove(&name);
+
+    // spawn 失败直接 Err 走命令拒绝路径，前端本地标错
+    let mut child = spawn_upgrade(&name)?;
+    state
+        .children
+        .lock()
+        .unwrap()
+        .insert(name.clone(), child.id());
+    let _ = app.emit(
+        UPGRADE_EVENT,
+        NpmUpgradeProgress {
+            name: name.clone(),
+            status: "preparing".into(),
+            output: String::new(),
+            error: String::new(),
+            local_version: String::new(),
+        },
+    );
+
+    // 进程等待是阻塞调用，放工作线程；读线程先于终态事件排空管道
+    let app2 = app.clone();
+    let name2 = name.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let mut readers = Vec::new();
+        if let Some(out) = child.stdout.take() {
+            readers.push(spawn_reader(out, app2.clone(), name2.clone()));
+        }
+        if let Some(err) = child.stderr.take() {
+            // npm 的进度日志主要走 stderr，同样转发
+            readers.push(spawn_reader(err, app2, name2));
+        }
+        let status = child.wait();
+        for r in readers {
+            let _ = r.join();
+        }
+        status.map(|s| s.success()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("升级线程失败: {e}"))?;
+
+    state.children.lock().unwrap().remove(&name);
+    let cancelled = state.cancels.lock().unwrap().remove(&name);
+    let emit_final = |status: &str, error: &str, local_version: &str| {
+        let _ = app.emit(
+            UPGRADE_EVENT,
+            NpmUpgradeProgress {
+                name: name.clone(),
+                status: status.to_string(),
+                output: String::new(),
+                error: error.to_string(),
+                local_version: local_version.to_string(),
+            },
+        );
+    };
+    match result {
+        Ok(true) => {
+            let local_version = installed_version_after_upgrade(&manual_root, &name);
+            emit_final("done", "", &local_version);
+        }
+        Ok(false) => {
+            if cancelled {
+                emit_final("cancelled", "", "");
+            } else {
+                emit_final("error", "npm 退出码非 0，详见输出", "");
+            }
+        }
+        Err(e) => emit_final("error", &e, ""),
+    }
+    Ok(())
+}
+
+/// 取消进行中的升级：杀整个进程树（cmd → node 子进程）
+#[tauri::command]
+pub async fn npm_cancel_upgrade(state: State<'_, NpmState>, name: String) -> Result<(), String> {
+    let name = name.trim().to_string();
+    state.cancels.lock().unwrap().insert(name.clone());
+    let pid = state.children.lock().unwrap().remove(&name);
+    if let Some(pid) = pid {
+        let _ = tokio::task::spawn_blocking(move || kill_tree(pid)).await;
+    }
+    Ok(())
+}
+
+fn kill_tree(pid: u32) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000)
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("kill")
+            .arg("-9")
+            .arg(pid.to_string())
+            .output();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{encode_name, normalize_registry, parse_latest, scan_root};
+    use super::{encode_name, normalize_registry, parse_latest, scan_root, valid_pkg_name};
     use std::fs;
     use std::path::Path;
 
@@ -283,6 +507,17 @@ mod tests {
     fn encodes_scoped_name() {
         assert_eq!(encode_name("@types/node"), "@types%2Fnode");
         assert_eq!(encode_name("typescript"), "typescript");
+    }
+
+    #[test]
+    fn validates_pkg_names() {
+        assert!(valid_pkg_name("typescript"));
+        assert!(valid_pkg_name("@types/node"));
+        assert!(valid_pkg_name("npm-check-updates"));
+        assert!(!valid_pkg_name(""));
+        assert!(!valid_pkg_name("a;rm -rf"));
+        assert!(!valid_pkg_name("a b"));
+        assert!(!valid_pkg_name("$(calc)"));
     }
 
     #[test]
