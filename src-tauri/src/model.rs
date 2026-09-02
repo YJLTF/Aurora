@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Aurora 自身发布仓库（用于自更新检查）
+pub const SELF_REPO: &str = "YJLTF/Aurora";
+
+fn default_true() -> bool {
+    true
+}
+
 /// 全局设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -10,6 +17,11 @@ pub struct Settings {
     pub download_proxy: String,
     /// 可选的 GitHub Token，避免 API 限流
     pub github_token: String,
+    /// VSCode 离线 vsix 备份目录
+    pub vscode_dir: String,
+    /// 启动时自动检查 Aurora 自身更新
+    #[serde(default = "default_true")]
+    pub auto_check_self: bool,
 }
 
 impl Default for Settings {
@@ -19,6 +31,8 @@ impl Default for Settings {
             github_api_base: "https://api.github.com".into(),
             download_proxy: String::new(),
             github_token: String::new(),
+            vscode_dir: String::new(),
+            auto_check_self: true,
         }
     }
 }
@@ -111,6 +125,66 @@ pub struct CheckOutcome {
     pub suggested: u32,
     /// Some(true) 表示最新版本大于本地已登记版本；未登记本地版本时为 None
     pub has_update: Option<bool>,
+    /// Release 说明文本（GitHub body），来源无说明时为空
+    pub notes: String,
+    pub error: String,
+}
+
+/// 应用自身信息
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    pub version: String,
+    pub repo: String,
+}
+
+/// Aurora 自身更新检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub release_url: String,
+    pub notes: String,
+    pub assets: Vec<Asset>,
+    pub suggested: u32,
+    pub error: String,
+}
+
+/// 备份目录中的一个 .vsix 文件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VsixInfo {
+    /// publisher.extension
+    pub id: String,
+    pub version: String,
+    /// 目标平台后缀（win32-x64 等），通用包为空
+    pub target: String,
+    pub file_name: String,
+    /// 文件所在目录（绝对路径）
+    pub dir: String,
+}
+
+/// 参与检查的插件（去重后的 ID + 平台 + 本地版本）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VsixRef {
+    pub id: String,
+    pub target: String,
+    pub local_version: String,
+}
+
+/// 单个插件的 Marketplace 检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VsixCheck {
+    pub id: String,
+    pub local_version: String,
+    pub latest_version: String,
+    /// 最新版 vsix 下载直链
+    pub download_url: String,
+    pub has_update: bool,
     pub error: String,
 }
 

@@ -1,8 +1,9 @@
 mod model;
 mod net;
 mod version;
+mod vscode;
 
-use model::{CheckOutcome, Config, Settings, SoftwareItem};
+use model::{AppInfo, CheckOutcome, Config, SelfUpdateInfo, Settings, SoftwareItem};
 use tauri::{AppHandle, Manager};
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -21,6 +22,14 @@ fn normalize_settings(app: &AppHandle, s: &mut Settings) {
     }
     if s.github_api_base.trim().is_empty() {
         s.github_api_base = "https://api.github.com".into();
+    }
+    // VSCode 备份目录默认放在下载目录下
+    if s.vscode_dir.trim().is_empty() && !s.download_dir.trim().is_empty() {
+        s.vscode_dir = format!(
+            "{}{}vscode",
+            s.download_dir.trim_end_matches(['/', '\\']),
+            std::path::MAIN_SEPARATOR
+        );
     }
 }
 
@@ -60,6 +69,22 @@ fn save_data(app: AppHandle, config: Config) -> Result<(), String> {
 #[tauri::command]
 async fn check_item(item: SoftwareItem, settings: Settings) -> Result<CheckOutcome, String> {
     Ok(net::check_item(&item, &settings).await)
+}
+
+/// 当前应用版本与自更新仓库
+#[tauri::command]
+fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        repo: model::SELF_REPO.into(),
+    }
+}
+
+/// 检查 Aurora 自身的更新（GitHub Releases）
+#[tauri::command]
+async fn check_self_update(app: AppHandle, settings: Settings) -> SelfUpdateInfo {
+    let current = app.package_info().version.to_string();
+    net::check_self_update(&current, &settings).await
 }
 
 /// 用资源管理器打开目录；reveal 为 true 时定位到文件
@@ -139,9 +164,14 @@ pub fn run() {
             load_data,
             save_data,
             check_item,
+            app_info,
+            check_self_update,
             net::download_file,
             net::cancel_download,
             net::list_downloads,
+            vscode::list_vsix,
+            vscode::read_installed_extensions,
+            vscode::check_vscode_updates,
             open_path,
             open_url
         ])

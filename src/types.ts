@@ -32,6 +32,50 @@ export interface Settings {
   githubApiBase: string;
   downloadProxy: string;
   githubToken: string;
+  /** VSCode 离线 vsix 备份目录 */
+  vscodeDir: string;
+  /** 启动时自动检查 Aurora 自身更新 */
+  autoCheckSelf: boolean;
+}
+
+export interface AppInfo {
+  version: string;
+  repo: string;
+}
+
+export interface SelfUpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseUrl: string;
+  notes: string;
+  assets: Asset[];
+  suggested: number;
+  error: string;
+}
+
+export interface VsixInfo {
+  id: string;
+  version: string;
+  /** 目标平台后缀（win32-x64 等），通用包为空 */
+  target: string;
+  fileName: string;
+  dir: string;
+}
+
+export interface VsixRef {
+  id: string;
+  target: string;
+  localVersion: string;
+}
+
+export interface VsixCheck {
+  id: string;
+  localVersion: string;
+  latestVersion: string;
+  downloadUrl: string;
+  hasUpdate: boolean;
+  error: string;
 }
 
 export interface Config {
@@ -46,6 +90,8 @@ export interface CheckOutcome {
   suggested: number;
   /** Some(true)=有更新；未登记本地版本时为 null */
   hasUpdate: boolean | null;
+  /** Release 说明文本，来源无说明时为空 */
+  notes: string;
   error: string;
 }
 

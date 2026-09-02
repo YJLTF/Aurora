@@ -7,6 +7,7 @@ import type {
   Config,
   DownloadProgress,
   ItemStatus,
+  SelfUpdateInfo,
   Settings,
   SoftItem,
 } from "./types";
@@ -15,6 +16,8 @@ import SoftRow from "./components/SoftRow.vue";
 import ItemEditor from "./components/ItemEditor.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import AssetPicker from "./components/AssetPicker.vue";
+import SelfUpdateDialog from "./components/SelfUpdateDialog.vue";
+import VscodePanel from "./components/VscodePanel.vue";
 
 const config = ref<Config>({
   settings: {
@@ -22,6 +25,8 @@ const config = ref<Config>({
     githubApiBase: "https://api.github.com",
     downloadProxy: "",
     githubToken: "",
+    vscodeDir: "",
+    autoCheckSelf: true,
   },
   items: [],
 });
@@ -38,6 +43,18 @@ const editorItem = ref<SoftItem | null>(null);
 const editorOpen = ref(false);
 const settingsOpen = ref(false);
 const pickerItem = ref<SoftItem | null>(null);
+
+/** 主视图切换：软件雷达 / VSCode 插件 */
+const view = ref<"radar" | "vscode">("radar");
+const vsStats = ref({ total: 0, updates: 0 });
+
+/** Aurora 自身更新 */
+const SELF_DL_ID = "aurora-self-update";
+const appVersion = ref("");
+const selfInfo = ref<SelfUpdateInfo | null>(null);
+const selfDialogOpen = ref(false);
+const selfChecking = ref(false);
+const selfDownloading = ref(false);
 
 interface Toast {
   id: number;
@@ -81,6 +98,14 @@ onMounted(async () => {
   }
   ready.value = true;
   void refreshDownloaded();
+  try {
+    const info = await api.appInfo();
+    appVersion.value = info.version;
+  } catch {
+    appVersion.value = "";
+  }
+  // 启动时静默检查自身更新（可在设置中关闭）
+  if (config.value.settings.autoCheckSelf && api.isTauri) void checkSelf(true);
   await api.onProgress((p) => {
     if (p.status === "progressing") {
       downloads.value[p.itemId] = p;
@@ -88,19 +113,89 @@ onMounted(async () => {
       delete downloads.value[p.itemId];
       downloadingIds.delete(p.itemId);
       donePaths.value[p.itemId] = p.path;
-      toast(`${p.fileName} 下载完成`, "ok");
-      setTimeout(() => delete donePaths.value[p.itemId], 60_000);
+      if (p.itemId === SELF_DL_ID) {
+        selfDownloading.value = false;
+        toast(`${p.fileName} 下载完成，运行安装包即可完成升级`, "ok");
+        setTimeout(() => delete donePaths.value[p.itemId], 60_000);
+      } else {
+        toast(`${p.fileName} 下载完成`, "ok");
+        setTimeout(() => delete donePaths.value[p.itemId], 60_000);
+      }
       void refreshDownloaded();
     } else if (p.status === "cancelled") {
       delete downloads.value[p.itemId];
       downloadingIds.delete(p.itemId);
+      if (p.itemId === SELF_DL_ID) selfDownloading.value = false;
     } else if (p.status === "error") {
       delete downloads.value[p.itemId];
       downloadingIds.delete(p.itemId);
+      if (p.itemId === SELF_DL_ID) selfDownloading.value = false;
       toast(`下载失败：${p.error}`, "err");
     }
   });
 });
+
+/** 检查 Aurora 自身更新；silent 为启动时的静默检查 */
+async function checkSelf(silent = false) {
+  if (selfChecking.value) return;
+  selfChecking.value = true;
+  try {
+    const info = await api.checkSelfUpdate(config.value.settings);
+    selfInfo.value = info;
+    if (!info.error) {
+      if (info.hasUpdate && !silent) toast(`发现新版本 v${info.latestVersion}`, "ok");
+      if (info.hasUpdate && silent) {
+        toast(`Aurora 有新版本 v${info.latestVersion}，点击左下角版本号查看`, "ok");
+      }
+      if (!info.hasUpdate && !silent) toast(`Aurora 已是最新（v${info.currentVersion}）`);
+    } else if (!silent) {
+      toast(`检查更新失败: ${info.error}`, "err");
+    }
+  } catch (e) {
+    if (!silent) toast(`检查更新失败: ${e}`, "err");
+  } finally {
+    selfChecking.value = false;
+  }
+}
+
+function openSelfDialog() {
+  selfDialogOpen.value = true;
+  // 从未检查过时进入弹窗自动检查
+  if (!selfInfo.value) void checkSelf(true);
+}
+
+async function startSelfDownload(asset: Asset) {
+  if (!config.value.settings.downloadDir.trim()) {
+    toast("请先在设置里填写下载目录", "err");
+    settingsOpen.value = true;
+    return;
+  }
+  const ver = selfInfo.value?.latestVersion ?? "";
+  let name = asset.name || `Aurora_${ver || "latest"}.exe`;
+  // 文件名不含版本号时补上，便于与下载目录里的历史安装包区分
+  if (ver && !containsVersion(stemOnly(name), ver)) {
+    const m = name.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
+    name = m ? `${m[1]}-${ver}${m[2]}` : `${name}-${ver}`;
+  }
+  selfDownloading.value = true;
+  try {
+    await api.download({
+      itemId: SELF_DL_ID,
+      url: asset.url,
+      fileName: name,
+      destDir: config.value.settings.downloadDir,
+      proxyPrefix: config.value.settings.downloadProxy,
+    });
+  } catch (e) {
+    if (!String(e).includes("取消")) toast(`Aurora 安装包下载失败：${e}`, "err");
+  } finally {
+    selfDownloading.value = false;
+  }
+}
+
+function notify(text: string, kind: "ok" | "err" | "info") {
+  toast(text, kind);
+}
 
 const counts = computed<Record<string, number>>(() => {
   const c: Record<string, number> = {
@@ -355,6 +450,14 @@ function openLocal(path: string, reveal = false) {
         </div>
       </div>
       <div class="top-actions">
+        <div class="seg view-seg">
+          <button :class="{ on: view === 'radar' }" @click="view = 'radar'">
+            软件雷达
+          </button>
+          <button :class="{ on: view === 'vscode' }" @click="view = 'vscode'">
+            VSCode 插件
+          </button>
+        </div>
         <button class="btn ghost" @click="openAdd">＋ 添加软件</button>
         <button class="btn ghost" @click="settingsOpen = true">设置</button>
         <button
@@ -372,7 +475,10 @@ function openLocal(path: string, reveal = false) {
       </div>
     </header>
 
-    <nav v-if="ready && config.items.length" class="filters">
+    <nav
+      v-if="view === 'radar' && ready && config.items.length"
+      class="filters"
+    >
       <button
         v-for="f in filterDefs"
         :key="f.key"
@@ -384,7 +490,11 @@ function openLocal(path: string, reveal = false) {
       </button>
     </nav>
 
-    <main class="list" :class="{ 'is-empty': !visibleItems.length }">
+    <main
+      v-if="view === 'radar'"
+      class="list"
+      :class="{ 'is-empty': !visibleItems.length }"
+    >
       <div v-if="!ready" class="hint">读取配置中…</div>
       <div v-else-if="!config.items.length" class="hint empty">
         <p>还没有监控任何软件</p>
@@ -420,19 +530,44 @@ function openLocal(path: string, reveal = false) {
       </template>
     </main>
 
+    <VscodePanel
+      v-else
+      :settings="config.settings"
+      @open-settings="settingsOpen = true"
+      @open-path="openLocal"
+      @notify="notify"
+      @stats="(t, u) => (vsStats = { total: t, updates: u })"
+    />
+
     <footer class="statusbar">
-      <span>
-        {{ config.items.length }} 项受监控 ·
-        <b :class="{ amber: counts.update > 0 }">{{ counts.update }}</b> 项可更新
-      </span>
+      <template v-if="view === 'radar'">
+        <span>
+          {{ config.items.length }} 项受监控 ·
+          <b :class="{ amber: counts.update > 0 }">{{ counts.update }}</b> 项可更新
+        </span>
+      </template>
+      <template v-else>
+        <span>
+          {{ vsStats.total }} 个插件 ·
+          <b :class="{ amber: vsStats.updates > 0 }">{{ vsStats.updates }}</b> 个可更新
+        </span>
+      </template>
       <span class="grow"></span>
       <button
-        v-if="config.settings.downloadDir"
+        v-if="view === 'radar' && config.settings.downloadDir"
         class="linklike"
         title="打开下载目录"
         @click="openLocal(config.settings.downloadDir)"
       >
         下载目录：{{ config.settings.downloadDir }}
+      </button>
+      <button
+        class="linklike selfver"
+        title="检查 Aurora 更新"
+        @click="openSelfDialog"
+      >
+        <span v-if="selfInfo?.hasUpdate && !selfInfo?.error" class="dot" aria-hidden="true"></span>
+        Aurora v{{ appVersion || "…" }}
       </button>
       <span v-if="!api.isTauri" class="mocktag">浏览器预览 · 模拟数据</span>
     </footer>
@@ -447,9 +582,12 @@ function openLocal(path: string, reveal = false) {
     <SettingsPanel
       v-if="settingsOpen"
       :settings="config.settings"
+      :app-version="appVersion"
       @save="saveSettings"
       @close="settingsOpen = false"
       @open-dir="openLocal(config.settings.downloadDir)"
+      @open-vscode-dir="openLocal(config.settings.vscodeDir)"
+      @check-update="openSelfDialog"
     />
     <AssetPicker
       v-if="pickerItem"
@@ -462,6 +600,17 @@ function openLocal(path: string, reveal = false) {
         }
       "
       @close="pickerItem = null"
+    />
+    <SelfUpdateDialog
+      v-if="selfDialogOpen && selfInfo"
+      :info="selfInfo"
+      :checking="selfChecking"
+      :downloading="selfDownloading"
+      :dl="downloads[SELF_DL_ID] ?? null"
+      @check="checkSelf()"
+      @download="startSelfDownload"
+      @open-url="openUrl"
+      @close="selfDialogOpen = false"
     />
 
     <div class="toasts" aria-live="polite">

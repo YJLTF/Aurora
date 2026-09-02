@@ -1,11 +1,13 @@
 use crate::model::{
-    score_asset, Asset, CheckOutcome, DownloadProgress, Settings, SoftwareItem, Source,
+    score_asset, Asset, CheckOutcome, DownloadProgress, SelfUpdateInfo, Settings, SoftwareItem,
+    Source,
 };
 use crate::version::compare;
 use futures_util::StreamExt;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,13 +20,38 @@ pub struct AppState {
     pub cancels: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
-fn http_client() -> reqwest::Client {
+fn base_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Aurora/0.1")
+        .user_agent(concat!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Aurora/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(15))
-        .build()
-        .unwrap_or_default()
+}
+
+fn http_client() -> reqwest::Client {
+    base_client_builder().build().unwrap_or_default()
+}
+
+/// 构建"指定域名优先走 IPv4"的客户端：本机 IPv6 半通（TCP 可连但数据黑洞）时兜底。
+/// 解析不到 IPv4（纯 IPv6/代理场景）时退回常规构建，不影响原有通路。
+pub(crate) fn client_with_ipv4_pref(host: &str) -> reqwest::Client {
+    let builder = base_client_builder();
+    let Ok(addrs) = (host, 443u16).to_socket_addrs() else {
+        return builder.build().unwrap_or_default();
+    };
+    let v4: Vec<std::net::SocketAddr> = addrs.filter(|a| a.is_ipv4()).collect();
+    if v4.is_empty() {
+        return builder.build().unwrap_or_default();
+    }
+    builder.resolve_to_addrs(host, &v4).build().unwrap_or_default()
+}
+
+/// 从 URL 提取主机名（用于 IPv4 优先解析）
+fn host_of(url: &str) -> String {
+    let rest = url.split("://").nth(1).unwrap_or("");
+    rest.split(['/']).next().unwrap_or("").to_string()
 }
 
 /// 检测单个软件的最新版本
@@ -50,6 +77,7 @@ pub async fn check_item(item: &SoftwareItem, settings: &Settings) -> CheckOutcom
             assets: vec![],
             suggested: 0,
             has_update: None,
+            notes: String::new(),
             error: e,
         },
     }
@@ -117,7 +145,20 @@ fn outcome_from_release(v: &Value) -> CheckResult {
         .max_by_key(|(_, a)| score_asset(&a.name))
         .map(|(i, _)| i as u32)
         .unwrap_or(0);
-    Ok(CheckOutcome { version, release_url, assets, suggested, has_update: None, error: String::new() })
+    let notes = v
+        .get("body")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(CheckOutcome {
+        version,
+        release_url,
+        assets,
+        suggested,
+        has_update: None,
+        notes,
+        error: String::new(),
+    })
 }
 
 async fn check_github(repo: &str, settings: &Settings) -> CheckResult {
@@ -205,8 +246,36 @@ async fn check_html(check_url: &str, version_regex: &str, download_template: &st
         assets,
         suggested: 0,
         has_update: None,
+        notes: String::new(),
         error: String::new(),
     })
+}
+
+/// 检查 Aurora 自身的更新（GitHub Releases，仓库见 model::SELF_REPO）
+pub async fn check_self_update(current_version: &str, settings: &Settings) -> SelfUpdateInfo {
+    let mut info = SelfUpdateInfo {
+        current_version: current_version.to_string(),
+        latest_version: String::new(),
+        has_update: false,
+        release_url: String::new(),
+        notes: String::new(),
+        assets: vec![],
+        suggested: 0,
+        error: String::new(),
+    };
+    match check_github(crate::model::SELF_REPO, settings).await {
+        Ok(o) => {
+            info.latest_version = o.version.clone();
+            info.release_url = o.release_url;
+            info.notes = o.notes;
+            info.assets = o.assets;
+            info.suggested = o.suggested;
+            info.has_update = !o.version.trim().is_empty()
+                && compare(o.version.trim(), current_version.trim()) == std::cmp::Ordering::Greater;
+        }
+        Err(e) => info.error = e,
+    }
+    info
 }
 
 fn send_progress(
@@ -249,6 +318,8 @@ pub async fn download_file(
     file_name: String,
     dest_dir: String,
     proxy_prefix: String,
+    // VSCode 插件下载传 true：目标 CDN 在本机可能有半通 IPv6
+    prefer_ipv4: Option<bool>,
 ) -> Result<String, String> {
     let dest_dir = dest_dir.trim().to_string();
     if dest_dir.is_empty() {
@@ -297,7 +368,11 @@ pub async fn download_file(
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| safe_name.clone());
-    let client = http_client();
+    let client = if prefer_ipv4.unwrap_or(false) {
+        client_with_ipv4_pref(&host_of(&real_url))
+    } else {
+        http_client()
+    };
     let result = pump(
         &app, &client, &real_url, &tmp_path, &final_path, &item_id, &display_name, &cancel,
     )

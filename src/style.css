@@ -930,6 +930,229 @@ button {
   padding: 1px 7px;
 }
 
+/* ---------- Aurora 自更新弹窗 ---------- */
+
+.self-versions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.release-notes {
+  margin: 0;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 12px;
+  max-height: 190px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text1);
+  user-select: text;
+  scrollbar-width: thin;
+}
+
+.asset-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- VSCode 插件面板 ---------- */
+
+.vscode-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 0 26px 12px;
+}
+
+.vc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vc-dir {
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc-spacer {
+  flex: 1;
+}
+
+.vc-summary {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.vc-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+}
+
+.vrow {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.6fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) minmax(78px, 0.8fr) auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--bg1);
+  border: 1px solid #3c4a70;
+  border-radius: 10px;
+  padding: 9px 14px;
+  position: relative;
+}
+
+.vrow:hover {
+  border-color: #4d5c8b;
+}
+
+.vrow::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.vrow[data-status="update"]::before {
+  background: var(--amber);
+}
+
+.vrow[data-status="uptodate"]::before {
+  background: var(--green);
+}
+
+.vrow[data-status="error"]::before {
+  background: var(--red);
+}
+
+.vrow .vid {
+  font-size: 12.5px;
+  color: var(--text0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .vsub {
+  font-size: 11px;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .ver {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrow .ver.hot {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+.vrow .ver.ok {
+  color: var(--green);
+}
+
+.vrow .vops {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.vrow .dl-inline {
+  grid-column: 1 / -1;
+}
+
+.vrow-empty {
+  color: var(--text2);
+  text-align: center;
+  padding: 32px 0;
+}
+
+/* 顶栏视图切换 */
+.top-actions .view-seg {
+  margin-right: 6px;
+}
+
+/* 设置页开关与版本展示 */
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.inline-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--amber);
+}
+
+.ver-show {
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  color: var(--text1);
+}
+
+/* 状态栏版本入口 */
+.selfver {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selfver .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(247, 174, 69, 0.8);
+}
+
+/* VSCode 行首列 */
+.vmain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vid .pill {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
 /* ---------- Toast ---------- */
 
 .toasts {
