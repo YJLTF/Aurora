@@ -458,9 +458,12 @@ function openLocal(path: string, reveal = false) {
             VSCode 插件
           </button>
         </div>
-        <button class="btn ghost" @click="openAdd">＋ 添加软件</button>
+        <button v-if="view === 'radar'" class="btn ghost" @click="openAdd">
+          ＋ 添加软件
+        </button>
         <button class="btn ghost" @click="settingsOpen = true">设置</button>
         <button
+          v-if="view === 'radar'"
           class="btn primary"
           :disabled="checkAllRunning || !config.items.length"
           @click="checkAll"
