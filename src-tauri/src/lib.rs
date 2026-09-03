@@ -107,7 +107,14 @@ fn open_path(path: String, reveal: Option<bool>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         if reveal.unwrap_or(false) {
-            spawn_open("explorer", &format!("/select,{p}"))
+            // /select 与路径须同参，且引号只能包路径：普通 arg 遇含空格路径会整体
+            // 加引号（"/select,C:\a b\f.vsix"），explorer 解析失败会退开「文档」目录
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("explorer")
+                .raw_arg(format!("/select,\"{p}\""))
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         } else {
             spawn_open("explorer", p)
         }

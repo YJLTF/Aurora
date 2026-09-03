@@ -171,14 +171,14 @@ export function mockDownloadList(): string[] {
 }
 
 export function mockAppInfo(): AppInfo {
-  return { version: "0.3.0", repo: "YJLTF/Aurora" };
+  return { version: "0.3.1", repo: "YJLTF/Aurora" };
 }
 
-/** 模拟自更新：0.3.0 → 0.4.0 */
+/** 模拟自更新：0.3.1 → 0.4.0 */
 export async function mockSelfUpdate(_settings: Settings): Promise<SelfUpdateInfo> {
   await wait(600);
   return {
-    currentVersion: "0.3.0",
+    currentVersion: "0.3.1",
     latestVersion: "0.4.0",
     hasUpdate: true,
     releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.4.0",
