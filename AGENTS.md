@@ -17,7 +17,7 @@ cd src-tauri && cargo check && cargo test   # Rust 检查与单元测试（11 �
 ## 架构地图
 
 ```
-src/App.vue            壳层：顶栏（视图切换/设置/扫描/检查全部）、状态栏、设置与自更新弹窗
+src/App.vue            壳层：顶栏（视图切换/设置/扫描/检查全部）、状态栏、toast 通知（统一 10 秒滞留/可手动关闭/可带动作按钮）、设置与自更新弹窗
 src/components/
   RadarPanel.vue       软件雷达视图：清单/筛选/单项与全部检查/下载/已下载识别/编辑与选包弹窗
   VscodePanel.vue      VSCode 插件视图：扫描/检查/下载
@@ -41,7 +41,7 @@ src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 pa
 
 - **前后端字段映射**：Rust 结构体一律 `#[serde(rename_all = "camelCase")]`，与 `src/types.ts` 手写接口一一对应；新增字段两处都要加，可选字段用 `#[serde(default)]` 保证旧配置兼容。
 - **下载生命周期**（net.rs `pump`）：临时分片为 `<目标目录>/<文件名>.part`；暂停/失败**保留**分片，取消**删除**，完成 rename 为最终名。续传靠 `Range: bytes=N-`（206 追加 / 200 覆盖 / 416 删分片重来）；瞬时错误自动重试 2 次（退避 `attempt*800ms`），错误串用中文哨兵值（`下载已取消`/`下载已暂停`），前端 `download.ts` 按关键字分流。
-- **进度事件**：下载只 emit `download-progress`、npm 升级只 emit `npm-upgrade-progress`（progressing 等 + 终态；error 亦经事件推送）。App.vue `onMounted` 里**各全局唯一订阅**，分别喂给 `dlStore.handle()` 与 `npmPanel.handleUpgrade()`；done 事件按 itemId 分流：`vsix:` 前缀→`vsPanel.handleDone`（重扫备份目录刷新备份版本与行状态），其余→`radarPanel.handleDone`（刷新已下载识别）。组件不要各自再订阅。
+- **进度事件**：下载只 emit `download-progress`、npm 升级只 emit `npm-upgrade-progress`（progressing 等 + 终态；error 亦经事件推送）。App.vue `onMounted` 里**各全局唯一订阅**，分别喂给 `dlStore.handle()` 与 `npmPanel.handleUpgrade()`；done 事件按 itemId 分流：`aurora-self-update`→完成提示附「打开位置/立即安装」动作（`p.path` 为最终完整路径，复用 `open_path`）；`vsix:` 前缀→`vsPanel.handleDone`（重扫备份目录刷新备份版本与行状态），其余→`radarPanel.handleDone`（刷新已下载识别）。组件不要各自再订阅。
 - **IPv4 优先**：`net::client_with_ipv4_pref(host)` 为 marketplace.visualstudio.com、vsix CDN 与 npm registry 固定 IPv4 解析——国内环境 IPv6 半通（TCP 可连但数据黑洞）。新增直连国内不畅的域名时复用该函数，`DownloadArgs.preferIpv4` 控制下载路径。
 - **VSCode 页**：清单来自递归扫描 `.vsix` 文件名（解析规则见 `vscode.rs::parse_stem`，含平台后缀剥离）；同 id 多个文件保留最高版本，版本比较必须走语义化（`version::compare` / `compareVersion`），字符串序会把 `0.27.6` 排在 `0.27.2026082200` 前；检查结果由前端写入 `config.vscodeChecks` 持久化，重扫描时按新本地版本重算 `hasUpdate`；插件下载完成后由 App 转发 `handleDone` 重扫，备份版本与状态即时刷新。面板随视图常驻（`v-show`），`defineExpose({ scan, check, busy, handleDone })` 供顶栏与下载完成回调调用。
 - **NPM 页**：全局目录 = 设置手填 `npmGlobalRoot` 优先，否则执行 `npm root -g`（每次扫描重新探测，不缓存路径）；清单读各包 `package.json` 的 name/version（不解析目录名，天然规避别名包），`@scope` 进一层；检查走 `{registry}/-/package/<name>/dist-tags` 取 `latest`（scoped 名 URL 编码为 `@scope%2Fname`），结果写入 `config.npmChecks` 持久化。升级动作两档：「执行更新」= 后端 `npm install -g <包>@latest`（全局串行 `UPGRADE_LOCK`，输出逐行 emit 事件，取消杀进程树，done 回填新版本）与「复制命令」。
