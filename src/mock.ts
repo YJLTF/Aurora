@@ -171,21 +171,21 @@ export function mockDownloadList(): string[] {
 }
 
 export function mockAppInfo(): AppInfo {
-  return { version: "0.3.2", repo: "YJLTF/Aurora" };
+  return { version: "0.4.0", repo: "YJLTF/Aurora" };
 }
 
-/** 模拟自更新：0.3.2 → 0.4.0 */
+/** 模拟自更新：0.4.0 → 0.5.0 */
 export async function mockSelfUpdate(_settings: Settings): Promise<SelfUpdateInfo> {
   await wait(600);
   return {
-    currentVersion: "0.3.2",
-    latestVersion: "0.4.0",
+    currentVersion: "0.4.0",
+    latestVersion: "0.5.0",
     hasUpdate: true,
-    releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.4.0",
-    notes: "### v0.4.0（模拟数据）\n- 新增 NPM 全局包更新检查\n- 界面细节优化",
+    releaseUrl: "https://github.com/YJLTF/Aurora/releases/tag/v0.5.0",
+    notes: "### v0.5.0（模拟数据）\n- 界面细节优化",
     assets: [
-      { name: "Aurora_0.4.0_x64-setup.exe", url: "https://example.com/Aurora_0.4.0_x64-setup.exe", size: 8_800_000 },
-      { name: "Aurora_0.4.0_arm64-setup.exe", url: "https://example.com/Aurora_0.4.0_arm64-setup.exe", size: 8_100_000 },
+      { name: "Aurora_0.5.0_x64-setup.exe", url: "https://example.com/Aurora_0.5.0_x64-setup.exe", size: 8_800_000 },
+      { name: "Aurora_0.5.0_arm64-setup.exe", url: "https://example.com/Aurora_0.5.0_arm64-setup.exe", size: 8_100_000 },
     ],
     suggested: 0,
     error: "",

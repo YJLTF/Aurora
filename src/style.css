@@ -1235,6 +1235,58 @@ button {
   box-shadow: inset 3px 0 0 var(--cyan), 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
+.toast-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: -3px -5px 0 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text0);
+}
+
+.toast-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.toast-act {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toast-act:hover {
+  border-color: var(--cyan);
+  background: rgba(98, 203, 232, 0.26);
+}
+
 @keyframes drop {
   from {
     opacity: 0;

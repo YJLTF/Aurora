@@ -58,20 +58,38 @@ const selfChecking = ref(false);
 /** 自更新安装包传输中（跟随共享下载队列） */
 const selfDownloading = computed(() => dlStore.active.has(SELF_DL_ID));
 
+/** 提示条上的可选动作（如自更新完成后的 打开位置/立即安装） */
+interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 interface Toast {
   id: number;
   text: string;
   kind: "ok" | "err" | "info";
+  actions?: ToastAction[];
 }
 const toasts = ref<Toast[]>([]);
 let toastSeq = 1;
 
-function toast(text: string, kind: Toast["kind"] = "info") {
+/** 所有提示统一滞留 10 秒，期间可手动关闭 */
+const TOAST_MS = 10_000;
+
+function toast(text: string, kind: Toast["kind"] = "info", actions?: ToastAction[]) {
   const id = toastSeq++;
-  toasts.value.push({ id, text, kind });
-  setTimeout(() => {
-    toasts.value = toasts.value.filter((t) => t.id !== id);
-  }, 4200);
+  toasts.value.push({ id, text, kind, actions });
+  setTimeout(() => dropToast(id), TOAST_MS);
+}
+
+function dropToast(id: number) {
+  toasts.value = toasts.value.filter((t) => t.id !== id);
+}
+
+/** 触发动作后随手收掉该条提示 */
+function runToastAction(t: Toast, a: ToastAction) {
+  dropToast(t.id);
+  a.run();
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -103,7 +121,12 @@ onMounted(async () => {
     dlStore.handle(p);
     if (p.status === "done") {
       if (p.itemId === SELF_DL_ID) {
-        toast(`${p.fileName} 下载完成，运行安装包即可完成升级`, "ok");
+        // p.path 为安装包最终完整路径；reveal 定位文件，直接打开即执行安装
+        const file = p.path;
+        toast(`${p.fileName} 下载完成，可直接安装`, "ok", [
+          { label: "打开位置", run: () => openLocal(file, true) },
+          { label: "立即安装", run: () => openLocal(file) },
+        ]);
       } else if (p.itemId.startsWith("vsix:")) {
         toast(`${p.fileName} 下载完成`, "ok");
         vsPanel.value?.handleDone(p);
@@ -421,7 +444,20 @@ function openLocal(path: string, reveal = false) {
 
     <div class="toasts" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.kind">
-        {{ t.text }}
+        <div class="toast-main">
+          <span class="toast-text">{{ t.text }}</span>
+          <button class="toast-close" title="关闭" @click="dropToast(t.id)">✕</button>
+        </div>
+        <div v-if="t.actions?.length" class="toast-actions">
+          <button
+            v-for="a in t.actions"
+            :key="a.label"
+            class="toast-act"
+            @click="runToastAction(t, a)"
+          >
+            {{ a.label }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
