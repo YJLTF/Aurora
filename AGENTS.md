@@ -33,7 +33,7 @@ src-tauri/src/vscode.rs .vsix 文件名解析、递归扫描、VS Marketplace ex
 src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 package.json 扫描、registry dist-tags 批量检查（限并发）、一键升级（npm install -g 串行执行/进度事件/取消杀进程树）
 ```
 
-**视图面板模式**：三个面板均 `v-show` 常驻 + `defineExpose` 供顶栏直调（RadarPanel: `openAdd/checkAll/handleDone/busy`；VscodePanel: `scan/check/busy`；NpmPanel: `scan/check/busy/handleUpgrade`），数据经 props 传入、事件冒泡（`notify`→toast、`persist`→防抖保存、`stats`→状态栏计数）。清单数组由 RadarPanel 原地增删改（push/splice/索引赋值），配置持久化始终由 App 收口。
+**视图面板模式**：三个面板均 `v-show` 常驻 + `defineExpose` 供顶栏直调（RadarPanel: `openAdd/checkAll/handleDone/busy`；VscodePanel: `scan/check/busy/handleDone`；NpmPanel: `scan/check/busy/handleUpgrade`），数据经 props 传入、事件冒泡（`notify`→toast、`persist`→防抖保存、`stats`→状态栏计数）。清单数组由 RadarPanel 原地增删改（push/splice/索引赋值），配置持久化始终由 App 收口。
 
 配置文件：`%APPDATA%/com.aurora.updater/aurora.json`（settings + items + vscodeChecks + npmChecks），前端 250ms 防抖后 `save_data`。
 
@@ -41,9 +41,9 @@ src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 pa
 
 - **前后端字段映射**：Rust 结构体一律 `#[serde(rename_all = "camelCase")]`，与 `src/types.ts` 手写接口一一对应；新增字段两处都要加，可选字段用 `#[serde(default)]` 保证旧配置兼容。
 - **下载生命周期**（net.rs `pump`）：临时分片为 `<目标目录>/<文件名>.part`；暂停/失败**保留**分片，取消**删除**，完成 rename 为最终名。续传靠 `Range: bytes=N-`（206 追加 / 200 覆盖 / 416 删分片重来）；瞬时错误自动重试 2 次（退避 `attempt*800ms`），错误串用中文哨兵值（`下载已取消`/`下载已暂停`），前端 `download.ts` 按关键字分流。
-- **进度事件**：下载只 emit `download-progress`、npm 升级只 emit `npm-upgrade-progress`（progressing 等 + 终态；error 亦经事件推送）。App.vue `onMounted` 里**各全局唯一订阅**，分别喂给 `dlStore.handle()` 与 `npmPanel.handleUpgrade()`；组件不要各自再订阅。
+- **进度事件**：下载只 emit `download-progress`、npm 升级只 emit `npm-upgrade-progress`（progressing 等 + 终态；error 亦经事件推送）。App.vue `onMounted` 里**各全局唯一订阅**，分别喂给 `dlStore.handle()` 与 `npmPanel.handleUpgrade()`；done 事件按 itemId 分流：`vsix:` 前缀→`vsPanel.handleDone`（重扫备份目录刷新备份版本与行状态），其余→`radarPanel.handleDone`（刷新已下载识别）。组件不要各自再订阅。
 - **IPv4 优先**：`net::client_with_ipv4_pref(host)` 为 marketplace.visualstudio.com、vsix CDN 与 npm registry 固定 IPv4 解析——国内环境 IPv6 半通（TCP 可连但数据黑洞）。新增直连国内不畅的域名时复用该函数，`DownloadArgs.preferIpv4` 控制下载路径。
-- **VSCode 页**：清单来自递归扫描 `.vsix` 文件名（解析规则见 `vscode.rs::parse_stem`，含平台后缀剥离）；检查结果由前端写入 `config.vscodeChecks` 持久化，重扫描时按新本地版本重算 `hasUpdate`。面板随视图常驻（`v-show`），`defineExpose({ scan, check, busy })` 供顶栏调用。
+- **VSCode 页**：清单来自递归扫描 `.vsix` 文件名（解析规则见 `vscode.rs::parse_stem`，含平台后缀剥离）；检查结果由前端写入 `config.vscodeChecks` 持久化，重扫描时按新本地版本重算 `hasUpdate`；插件下载完成后由 App 转发 `handleDone` 重扫，备份版本与状态即时刷新。面板随视图常驻（`v-show`），`defineExpose({ scan, check, busy, handleDone })` 供顶栏与下载完成回调调用。
 - **NPM 页**：全局目录 = 设置手填 `npmGlobalRoot` 优先，否则执行 `npm root -g`（每次扫描重新探测，不缓存路径）；清单读各包 `package.json` 的 name/version（不解析目录名，天然规避别名包），`@scope` 进一层；检查走 `{registry}/-/package/<name>/dist-tags` 取 `latest`（scoped 名 URL 编码为 `@scope%2Fname`），结果写入 `config.npmChecks` 持久化。升级动作两档：「执行更新」= 后端 `npm install -g <包>@latest`（全局串行 `UPGRADE_LOCK`，输出逐行 emit 事件，取消杀进程树，done 回填新版本）与「复制命令」。
 - **浏览器预览**：任何新命令都要在 `api.ts` 里同时写 Tauri 分支与 mock 分支，保证 `npm run dev` 可用。
 - **界面语言**：全中文；深蓝主题变量见 `style.css` 顶部 `:root`；新 UI 优先复用既有 class（btn/pill/dl/chip…），不要引入组件库。滚动条统一由 style.css 顶部的全局规则控制（`scrollbar-width: thin` + 主题色），不要在局部再写。
@@ -64,6 +64,7 @@ src-tauri/src/npm.rs   npm root -g 探测（Windows 经 cmd /C）、全局包 pa
 - **WebView2 的 `navigator.clipboard` 不可靠**（可能静默挂起、成败都无回调）：写剪贴板统一走后端 `copy_text` 命令（arboard），不要在前端直接调 clipboard API。
 - **npm 管道模式（非 TTY）下几乎静默**：安装过程中途没有输出，直到结束才一次性打印。升级进度靠「spawn 后立即 emit 一条已启动 + `--loglevel=info` 中间日志 + 前端已用时秒数」兜底，不要指望 npm 持续吐进度。
 - **tauri 命令内避免「闭包映射出 async block」**（如 `items.iter().map(|x| async move {…})`）：generate_handler 包装要求生命周期泛化，会报 `implementation of FnOnce is not general enough`。解法：用 for 循环把 owned 值 clone 进 future 列表（参见 `npm.rs::check_npm_updates`）。
+- **explorer `/select` 必须原样传参**：普通 `Command::arg` 遇含空格路径会整体加引号（`"/select,C:\a b\f.vsix"`），explorer 解析失败退开「文档」目录；须用 `raw_arg` 让引号只包路径（见 `lib.rs::open_path`）。
 
 ## 提交规范
 
