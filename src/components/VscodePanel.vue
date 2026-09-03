@@ -63,7 +63,9 @@ async function scan() {
     const map = new Map<string, VsRow>();
     for (const f of files) {
       const key = f.id.toLowerCase();
-      if (!map.has(key)) map.set(key, { ...f });
+      const cur = map.get(key);
+      // 同名插件保留最高版本；必须语义比较（字符串序会误判 0.27.6 > 0.27.2026082200）
+      if (!cur || compareVersion(f.version, cur.version) > 0) map.set(key, { ...f });
     }
     rows.value = [...map.values()];
     scanned.value = true;
