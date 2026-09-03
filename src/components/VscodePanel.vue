@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { api } from "../api";
 import { dlStore } from "../download";
 import { compareVersion } from "../types";
-import type { Settings, VsixCheck } from "../types";
+import type { DownloadProgress, Settings, VsixCheck } from "../types";
 import { joinPath, timeAgo } from "../utils";
 import DlProgress from "./DlProgress.vue";
 
@@ -135,8 +135,8 @@ async function check() {
   }
 }
 
-/** 供顶栏按钮调用（扫描 / 检查全部） */
-defineExpose({ scan, check, busy });
+/** 供顶栏按钮调用（扫描 / 检查全部），handleDone 由 App 的下载完成事件转发 */
+defineExpose({ scan, check, busy, handleDone });
 
 function statusOf(r: VsRow): VStatus {
   const c = checks.value[r.id.toLowerCase()];
@@ -193,6 +193,26 @@ function download(r: VsRow) {
 
 function emitStats() {
   emit("stats", rows.value.length, updateCount.value);
+}
+
+/** 下载完成转发入口（App 的全局进度订阅调用）：重扫备份目录，备份版本与行状态即随新文件刷新 */
+function handleDone(p: DownloadProgress) {
+  if (!p.itemId.startsWith("vsix:")) return;
+  void rescanAfterDone();
+}
+
+/** 扫描进行中收到完成事件时记一笔，扫完补扫一次，保证最后落盘的文件不漏 */
+let rescanPending = false;
+async function rescanAfterDone() {
+  if (busy.scanning) {
+    rescanPending = true;
+    return;
+  }
+  await scan();
+  if (rescanPending && !busy.scanning) {
+    rescanPending = false;
+    void scan();
+  }
 }
 </script>
 

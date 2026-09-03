@@ -98,17 +98,19 @@ onMounted(async () => {
   dlStore.setNotify(toast);
   // 启动时静默检查自身更新（可在设置中关闭）
   if (config.value.settings.autoCheckSelf && api.isTauri) void checkSelf(true);
-  // 全局唯一订阅下载进度：状态入共享队列，完成提示与雷达「已下载识别」在这里收口
+  // 全局唯一订阅下载进度：状态入共享队列，完成提示与各面板刷新收口在这里
   await api.onProgress((p) => {
     dlStore.handle(p);
     if (p.status === "done") {
-      toast(
-        p.itemId === SELF_DL_ID
-          ? `${p.fileName} 下载完成，运行安装包即可完成升级`
-          : `${p.fileName} 下载完成`,
-        "ok",
-      );
-      if (p.itemId !== SELF_DL_ID) radarPanel.value?.handleDone(p);
+      if (p.itemId === SELF_DL_ID) {
+        toast(`${p.fileName} 下载完成，运行安装包即可完成升级`, "ok");
+      } else if (p.itemId.startsWith("vsix:")) {
+        toast(`${p.fileName} 下载完成`, "ok");
+        vsPanel.value?.handleDone(p);
+      } else {
+        toast(`${p.fileName} 下载完成`, "ok");
+        radarPanel.value?.handleDone(p);
+      }
     }
   });
   // npm 升级进度同样全局唯一订阅，转交 NpmPanel 消化
