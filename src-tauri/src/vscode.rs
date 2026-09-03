@@ -94,7 +94,7 @@ pub async fn list_vsix(dir: String) -> Result<Vec<VsixInfo>, String> {
             });
         }
     }
-    out.sort_by(|a, b| a.id.cmp(&b.id).then(b.version.cmp(&a.version)));
+    sort_infos(&mut out);
     Ok(out)
 }
 
@@ -286,6 +286,12 @@ fn fallback_url(publisher: &str, name: &str, version: &str) -> String {
     )
 }
 
+/// 按 id 升序、版本语义降序排序（同插件最高版本在前）。
+/// 版本必须走数值化比较：字符串序会把 0.27.6 排在 0.27.2026082200 之前。
+fn sort_infos(out: &mut [VsixInfo]) {
+    out.sort_by(|a, b| a.id.cmp(&b.id).then(compare(&b.version, &a.version)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_stem;
@@ -316,5 +322,21 @@ mod tests {
     fn rejects_names_without_version() {
         assert!(parse_stem("eslint").is_none());
         assert!(parse_stem("no-version-here").is_none());
+    }
+
+    #[test]
+    fn sorts_same_id_by_semantic_version_desc() {
+        let mk = |version: &str| crate::model::VsixInfo {
+            id: "vscjava.vscode-java-dependency".into(),
+            version: version.into(),
+            target: String::new(),
+            file_name: format!("vscjava.vscode-java-dependency-{version}.vsix"),
+            dir: "d".into(),
+        };
+        let mut infos = vec![mk("0.27.6"), mk("0.27.2026082200"), mk("0.27.10")];
+        super::sort_infos(&mut infos);
+        assert_eq!(infos[0].version, "0.27.2026082200");
+        assert_eq!(infos[1].version, "0.27.10");
+        assert_eq!(infos[2].version, "0.27.6");
     }
 }
